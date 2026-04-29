@@ -1,0 +1,35 @@
+_ Creating initial project by drawing UML then coding class 
+_ Create Database, access to appsettings.json file and set 
+    "ConnectionStrings": {
+        "DefaultConnection": "Data Source={yourlocalhost};Initial Catalog={databasename};User Id=sa;Password={YOUR_PASSWORD};Integrated Security=False;TrustServerCertificate=True;"
+    },
+_Using comments
+	dotnet build : to check your code
+	dotnet ef migrations add init: to add migrations folder
+	dotnet ef migrations remove: to clear setup in migrations folder
+	dotnet ef database update
+-Now we build project:
+	Create Controller file and code basic API code (GetAll, GetById, Post, Put, Delete)
+	Create Dtos then building ClassDto because we don't want user to see all data, to do it, create a ClassDto and a mapper class to convert ClassDto to Class and inverse 
+	DJ is make all subclass was created outside the main class, We make an interface with each of class, Make repository of them following to interface's function 
+	Build function using async, await to increase efficiently of system 
+	Data validation to make sure the information that we input to the system is right with their format, it is like a grid to check if information suitable with object. One of the most common way to do that is check Json file before it goes to the database. So that, we usually use it in Dto files
+
+	Making an Query Objects for filtering, sorting 
+	Filtering (searching task): Making Query Objects, fix GetAll method and set the 
+	Sorting (searching task): code in Query Objects, code the SortBy function 
+
+	Pagination: 
+		+ don't return all results at once 
+		+ break them into pages 
+	Identity by JWT
+
+	
+
+	install package Microsoft.AspNetCore.SignalR
+Python API:
+
+check link to learn how to start with python API: 
+
+https://www.youtube.com/watch?v=8TMQcRcBnW8 	
+

@@ -1,0 +1,22 @@
+- Comment Create 
+	
+	People is an object that contains embedding vectors, so one people can have many embedding vectors but a vector will be of a people. That constraint called one to many
+	PeopleId which is a primary key of an object of people class, also is a foreigner key of an embedding vector object
+	Thus, when we create an object embedding vector and save them, we must add PeopleId to identity the people object which its belong to. 
+
+	Code:
+	Create(int PeopleId, CreateEmbedding embedding) 
+		_checkExists(PeopleId)
+		_repo.Create(embedding) 
+	
+	Transferring the information of embedding vector to Dto information type ( by adding a class CreateEmbeddingDto)
+	In Interface of People Repository, add Task to check if people exist by checking its id
+	building following method in PeopleRepository.Cs file 
+	In Interface of Embedding Repository, add Task to create new embedding vector using Dto information
+	building following method in EmbeddingRepository.Cs file
+	In embedding controller file, building Create method following Code logic
+
+	Create(int PeopleId, CreateEmbedding embedding) 
+		_checkExists(PeopleId)
+		_repo.Create(embedding) 
+		

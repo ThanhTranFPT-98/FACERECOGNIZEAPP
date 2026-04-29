@@ -1,0 +1,54 @@
+1. Camera → ASP.NET
+ASP.NET lấy frame (0.5s / 1s)
+Gửi ảnh → API Python
+2. Python (AI xử lý)
+Detect face
+Trích xuất embedding (vector)
+So sánh với danh sách vector đã load (từ DB/API)
+
+Trả về JSON:
+
+{
+  "face_detected": true,
+  "name": "thanh",
+  "score": 0.6017,
+  "is_unknown": false
+}
+3. ASP.NET nhận kết quả AI
+Case 1: Không có mặt
+Bỏ qua
+Case 2: Có mặt → xử lý tiếp
+Logic phân loại
+✔ Nếu match (person_id != null)
+
+→ Người quen (Worker)
+
+Ghi AccessEvent
+Xác định:
+IN / OUT (dựa lịch sử gần nhất)
+Không tạo cảnh báo
+Nếu không match
+Bước 1: Kiểm tra Visitor đã đăng ký
+So với danh sách khách trong ngày
+
+Nếu match:
+
+Ghi log như Visitor
+Không cảnh báo
+Bước 2: Nếu không phải Visitor
+
+→ Người lạ (Unknown)
+
+Ghi AccessEvent
+Tạo Alert
+UI cảnh báo và yêu cầu khai báo
+Ghi DB
+AccessEvents
+PersonId / StrangerId / null
+Time
+Type (IN / OUT)
+Snapshot
+Alerts
+Time
+Image
+Status (New / Resolved)

@@ -1,0 +1,13 @@
+- Cách tải package: mở Tools, bật nuget packages manage bật package manager Console, Gõ lệnh tải package phù hợp
+Install-Package Microsoft.EntityFrameworkCore.SqlServer -Version 8.0.0
+
+
+- Refactor to Repository Pattern 
++ folder Interfaces:
+	Declare all method in interface class
+	(variance and types of variance will be what type of variance that we deal in the method ( check it in Controller file)
++ Folder Repository
+	Access class in repository and declare method following method in interfaces with the logic in Controller file
++ Folder Controller (PeopleController)
+	Fix the following method attend to " await" comment
+	

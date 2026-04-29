@@ -1,0 +1,160 @@
+import React, { useState } from 'react'
+import { Layout, Menu, Badge, Avatar, Typography, Space, theme } from 'antd'
+import {
+  DashboardOutlined,
+  VideoCameraOutlined,
+  TeamOutlined,
+  UserAddOutlined,
+  FileTextOutlined,
+  BellOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { useSignalR } from '../../contexts/SignalRContext'
+
+const { Header, Sider, Content } = Layout
+const { Title, Text } = Typography
+
+const menuItems = [
+  {
+    key: '/dashboard',
+    icon: <DashboardOutlined />,
+    label: 'Dashboard',
+  },
+  {
+    key: '/monitor',
+    icon: <VideoCameraOutlined />,
+    label: 'Monitor',
+  },
+  {
+    key: '/employees',
+    icon: <TeamOutlined />,
+    label: 'Employees',
+  },
+  {
+    key: '/strangers',
+    icon: <UserAddOutlined />,
+    label: 'Strangers',
+  },
+  {
+    key: '/access-logs',
+    icon: <FileTextOutlined />,
+    label: 'Access Logs',
+  },
+  {
+    key: '/alerts',
+    icon: <BellOutlined />,
+    label: 'Alerts',
+  },
+  {
+    key: '/settings',
+    icon: <SettingOutlined />,
+    label: 'Settings',
+  },
+]
+
+const MainLayout = ({ children }) => {
+  const [collapsed, setCollapsed] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { isConnected, alerts } = useSignalR()
+  const {
+    token: { colorBgContainer, borderRadiusLG },
+  } = theme.useToken()
+
+  const handleMenuClick = ({ key }) => {
+    navigate(key)
+  }
+
+  const currentMenuKey = location.pathname
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sider
+        trigger={null}
+        collapsible
+        collapsed={collapsed}
+        theme="light"
+        style={{
+          boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
+        }}
+      >
+        <div
+          style={{
+            height: 64,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderBottom: '1px solid #f0f0f0',
+          }}
+        >
+          <Title level={collapsed ? 5 : 4} style={{ margin: 0, color: '#1890ff' }}>
+            {collapsed ? 'FR' : 'Face Recognition'}
+          </Title>
+        </div>
+        <Menu
+          theme="light"
+          mode="inline"
+          selectedKeys={[currentMenuKey]}
+          items={menuItems.map(item => ({
+            ...item,
+            label: item.key === '/alerts' ? (
+              <Badge count={alerts.length} size="small" offset={[10, 0]}>
+                <span>{item.label}</span>
+              </Badge>
+            ) : item.label,
+          }))}
+          onClick={handleMenuClick}
+          style={{ borderRight: 0 }}
+        />
+      </Sider>
+      <Layout>
+        <Header
+          style={{
+            padding: '0 24px',
+            background: colorBgContainer,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          }}
+        >
+          <Space>
+            <div
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                backgroundColor: isConnected ? '#52c41a' : '#ff4d4f',
+              }}
+            />
+            <Text type="secondary">
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </Text>
+          </Space>
+          <Space>
+            <Badge count={alerts.length}>
+              <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
+            </Badge>
+            <Avatar style={{ backgroundColor: '#1890ff' }}>A</Avatar>
+            <Text strong>Admin</Text>
+          </Space>
+        </Header>
+        <Content
+          style={{
+            margin: 24,
+            padding: 24,
+            background: colorBgContainer,
+            borderRadius: borderRadiusLG,
+            minHeight: 280,
+            overflow: 'auto',
+          }}
+        >
+          {children}
+        </Content>
+      </Layout>
+    </Layout>
+  )
+}
+
+export default MainLayout

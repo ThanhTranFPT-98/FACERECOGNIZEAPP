@@ -1,0 +1,50 @@
+Version of me:
+
+If you want to build services, you need to draw their data flow. Then coding follows the flow—writing functions to process data and transform it into the final result.
+
+For example:
+
+You want to build a face recognition service:
+
+First, the app captures an image and sends it to a Python service for recognition.
+The first type of data is an image file (or its link). You need to build a DTO class to contain the image link and other information such as capture time and capture device.
+The image is sent to the Python service, so you need to code a function for that functionality. This leads you to create an interface for that function.
+In the function, you need to convert the image into a format that the Python API can process.
+In the Python code, you create a FastAPI service and build a function to process the image and return the result to the app.
+After sending the image to the API and receiving the result (JSON), it will include total faces, PeopleId, and confidence score.
+Then, transform this data into a format suitable for saving to the database and sending signals to the UI.
+Therefore, you need to build a controller to receive and save the data.
+Finally, don’t forget to register the service in Program.
+
+
+
+GPT fixed version: 
+
+If you want to build services, you must start by defining the data flow. Coding should always follow that flow—each function exists to receive, process, and transform data step by step into the final result.
+
+For example:
+
+You want to build a face recognition service:
+
+First, the app captures an image and sends it to the backend.
+At this point, the first data flow is created: Image → Backend.
+→ You need a DTO (e.g., IFormFile, CaptureTime, DeviceId) to represent this data.
+Next, the backend sends the image to the Python service.
+→ This creates the second data flow: Backend → Python API.
+→ You implement a service + interface to handle this communication.
+In this step, the image is passed in a format that the Python API can process (typically multipart/form-data).
+In Python (FastAPI), you process the image and return the result.
+→ This creates the third data flow: Python → Backend.
+→ The response is JSON: total faces, PeopleId, confidence score.
+Now the backend receives this data and processes it.
+→ This is the core transformation step:
+Validate data
+Apply business logic (known/unknown, duplicate check, etc.)
+Convert into database model
+Then the data is saved to the database and optionally sent to the UI (e.g., SignalR).
+→ This creates the final data flows:
+Backend → Database
+Backend → UI
+The Controller only receives the initial request and passes it into the flow.
+The Service handles the main data transformation.
+Finally, don’t forget to register the service in Program.

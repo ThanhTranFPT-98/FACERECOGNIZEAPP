@@ -1,0 +1,54 @@
+- Giao diện là Web
+- App có phần bật camera và camera mặc định được bật khi mở app
+- App có các tab
+	 Dashboard
+	 Monitor
+	 Employees
+	 Strangers
+	 Access Logs
+	 Alerts
+	 Settings
+Dashboard: có các thông tin và
+có phần chuyển sang các tab khác 
+
+Các tab còn lại tùy theo tên sẽ có chức năng tương ứng như search hoặc nhập thông tin,... mà các app thông thường có
+
+phần Alerts ghi lại lịch sử cảnh báo tạm thời
+
+phần Settings theo các setting thông thường 
+
+ở tab Monitor có 
+=> Hàm tính toán 1s gọi api một lần ( có thể nằm ở UI?) 
+=> kiến trúc Backend
+
+api gọi về kết quả của python 
+	với logic: 		
+		- app chụp ảnh và gửi cho python làm việc
+		+ Gửi qua Api cung cấp data
+	python xử lý:
+
+		- Nhận ảnh và detect các khuôn mặt 
+			+ Nếu không có người => ghi kết quả không có người
+			+ Nếu có người => đếm số người, kiểm tra nhận diện từng người 
+			=> ghi kết quả
+		- Trả về kết quả cho app
+		Kết quả gồm:
+		- số người 
+		- Id từng người 
+		- Confidence score
+			
+	App nhận kết quả từ python 
+		- Kiểm tra xem có người không
+		+ Không có người => bỏ qua
+
+		+ Có người 
+			++ một người xử lý luôn, 
+			++ nếu nhiều người, xử lý từng người  
+		+ Logic xử lý
+			++ Kiểm tra PeopleId 
+			-- nhân viên công ty: ghi lại log theo thông tin truy suất PeopleId (vào ra theo lịch sử log gần nhất) , lưu lại ảnh vừa chụp, nếu người này đã được ghi log trong 20s trước thì không ghi lại. 
+
+			-- người lạ: đưa cảnh báo và yêu cầu khai báo, tạm thời dừng chương trình để khai báo, sau khi khai báo, ghi log, ảnh 
+
+	- Lặp lại quy trình kiểm tra từ bước đầu theo chu kỳ 1s		
+

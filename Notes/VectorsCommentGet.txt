@@ -1,0 +1,13 @@
+- Comment Get
+	fix comment Get of the People class (GetAll(), GetById() cause now we can build accessing embedding vectors when accessing people class 
+	
+	EF( Entity Framework) using comment " dotnet add package Microsoft.AspNetCore.Mvc.NewtonsoftJson --version 8.0.0" to update 
+		Newtonsoft.Json 
+		Microsoft.AspNetCore.Mvc.NewtonsoftJson --version 8.0.0
+		
+	Add a builder to Program.Cs file :
+		builder.Services.AddControllers.AddNewtonsoftJson(option =>
+		{
+		options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+		}
+		);

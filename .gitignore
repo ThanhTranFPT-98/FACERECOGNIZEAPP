@@ -1,0 +1,161 @@
+# =========================
+# OS / IDE
+# =========================
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.idea/
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# =========================
+# Logs (root-level runtime logs from start-all.bat)
+# =========================
+*.log
+aiservice.log
+backend.log
+backend_err.log
+ui.log
+
+# =========================
+# .NET / MyfirstASP_NET
+# =========================
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+*.csproj.user
+*.csproj.Backup.tmp
+*.pidb
+*.userprefs
+*.suo
+*.cache
+*.dbmdl
+*.dbproj.schemaview
+*.publishsettings
+project.lock.json
+project.fragment.lock.json
+artifacts/
+**/Properties/launchSettings.json
+
+# Local secrets (NEVER commit)
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+secrets.json
+
+# EF Core / Migrations cache
+*.dbmdl
+*.jfm
+
+# =========================
+# Node / React UI
+# =========================
+node_modules/
+dist/
+build/
+.npm/
+.eslintcache
+.parcel-cache/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# =========================
+# Python / AiService
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+face_detection_env/
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# Testing / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints
+
+# =========================
+# Model weights & data (DO NOT push to GitHub — too large or PII)
+# =========================
+*.pth
+*.pt
+*.onnx
+*.npz
+*.pkl
+*.h5
+*.bin
+!**/package-lock.json
+!**/package.json
+
+# Face dataset images & features (PII)
+AiService/datasets/
+AiService/assets/uploaded_images/
+MyfirstASP_NET/wwwroot/snapshots/
+
+# Misc large/binary
+*.mp4
+*.avi
+*.mov
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+# Backup files
+*.bak
+*.tmp
+*.orig

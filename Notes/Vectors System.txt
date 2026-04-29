@@ -1,0 +1,22 @@
+- Add an interface for Embedding 	
+- Building the following EmbeddingRepository
+- Building EmbeddingController
+	building EmbeddingDto
+	building EmbeddingMapper
+	
+
+
+
+
+
+* We need to build an system to convert Image from UI to vectors, then import them into database. It can follow these steps:
+
+- Convert Img to vectors by using Facerecognition
+- Save vectors to a template file 
+- Importing vectors with PeopleId by using code, before that convert them into string type
+
+* How to use it for recognizing task
+
+- Getting all vectors, or getting vectors following PeopleId 
+- Converting them into float again and processing 
+- Return people who is the most similarity which is higher than threshold 
