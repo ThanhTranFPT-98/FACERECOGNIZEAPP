@@ -130,8 +130,15 @@ public class ParkingDb : DbContext
     public DbSet<AuditEntry> Audit => Set<AuditEntry>();
     public DbSet<ParkingSession> Sessions => Set<ParkingSession>();
     public DbSet<VehiclePerson> VehiclePeople => Set<VehiclePerson>();
+    public DbSet<Camera> Cameras => Set<Camera>();
+    public DbSet<VideoSegment> VideoSegments => Set<VideoSegment>();
+    public DbSet<SyncOutboxItem> Outbox => Set<SyncOutboxItem>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<VideoSegment>().HasIndex(x => new { x.CameraId, x.FileName }).IsUnique();
+        model.Entity<VideoSegment>().HasIndex(x => new { x.Status, x.StartUtc });
+        model.Entity<VideoSegment>().HasIndex(x => new { x.CameraId, x.StartUtc });
+        model.Entity<SyncOutboxItem>().HasIndex(x => new { x.Status, x.Id });
         model.Entity<ParkingUser>().HasIndex(x => x.Username).IsUnique();
         model.Entity<RegisteredVehicle>().HasIndex(x => x.NormalizedPlate).IsUnique();
         model.Entity<AccessEvent>().HasIndex(x => x.CorrelationId).IsUnique();

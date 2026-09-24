@@ -122,6 +122,39 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.ToTable("Audit");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Camera", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LaneId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("LastSegmentUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("Record24x7")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SourceProtected")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Cameras");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.DeviceCommand", b =>
                 {
                     b.Property<Guid>("Id")
@@ -345,6 +378,58 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.ToTable("Vehicles");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.SyncOutboxItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("EvidenceId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("NextAttemptUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("SentUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "Id");
+
+                    b.ToTable("Outbox");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VehiclePerson", b =>
                 {
                     b.Property<Guid>("VehicleId")
@@ -356,6 +441,68 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.HasKey("VehicleId", "PersonId");
 
                     b.ToTable("VehiclePeople");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VideoSegment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CameraId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime>("EndUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("NextAttemptUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ObjectKey")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("UploadedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CameraId", "FileName")
+                        .IsUnique();
+
+                    b.HasIndex("CameraId", "StartUtc");
+
+                    b.HasIndex("Status", "StartUtc");
+
+                    b.ToTable("VideoSegments");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Visit", b =>

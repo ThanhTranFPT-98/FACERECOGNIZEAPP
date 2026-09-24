@@ -78,6 +78,26 @@ Existing face enrollment screens are administrator-only. Link primary and additi
 
 New/updated face template vectors are protected with ASP.NET Data Protection. Legacy plaintext vectors remain readable and are protected when rewritten; no bulk rewrite of the user's database was performed. Back up and secure the Data Protection key ring with the database: losing those keys makes encrypted templates unreadable. Key storage and at-rest protection must be configured for the production host/account. Existing model weights were not supplied or evaluated in this session.
 
+## 24/7 video and cloud upload (CR-001)
+
+Both features are **off by default**. They run inside the API process on the site station.
+
+1. Install ffmpeg on the station PC and set `Video__FfmpegPath` if it is not on PATH.
+2. Choose a video directory on a large disk (`Video__Directory`) and a quota below the disk size (`Video__LocalQuotaGb`). At ~2 Mbps, one camera needs ~21 GB per day.
+3. Set `Video__Enabled=true`, restart the API, then add cameras in **Parking → Cameras & video** (admin). Link each camera to its lane so events show their video. The RTSP URL, including its password, is stored encrypted; back up the Data Protection key ring with the database.
+4. Cloud: create a bucket at an S3-compatible provider with a data centre in Vietnam and add a **lifecycle rule that deletes objects after 30 days** (the application never deletes cloud objects). Then set `Cloud__Enabled=true`, `Cloud__Provider=S3`, `Cloud__Endpoint`, `Cloud__Bucket`, `Cloud__Region` (if the provider needs one), `Cloud__SiteId` (unique per site) and the keys through a secret store, never in committed files.
+5. Optional: `Cloud__UploadMbpsCap` limits upload bandwidth; `Video__NtpServer` enables an hourly clock check (`CLOCK_DRIFT` alert above `Video__MaxClockDriftSeconds`).
+
+Behaviour:
+
+- Recording: one ffmpeg per camera, stream copy (no re-encoding), `.ts` segments named by the station clock. A camera without new segments for 3 × `SegmentSeconds` raises `CAMERA_NOT_RECORDING` and is restarted.
+- Upload order: decision/command/session/alert records and their evidence photos first, then video, oldest first. Failures retry with backoff (up to 30 min). `UPLOAD_BACKLOG` fires when data older than `Cloud__BacklogAlertMinutes` is still waiting.
+- Local disk: over quota, the oldest **uploaded** segments are deleted first. If it stays over quota, `VIDEO_DISK_FULL` (Critical) fires; below `Video__MinFreeDiskFraction` free space the oldest un-uploaded segments are discarded and audited, so the disk and database never fill completely. Without cloud upload the station behaves as a plain local recorder.
+- Playback: the event **Video** button plays the segments ±10 s around the decision. Local files are remuxed to MP4 by ffmpeg; files already removed locally open through a 10-minute signed cloud link.
+- If the API process is killed abruptly, its ffmpeg processes keep recording until the API starts again and stops them (`ffmpeg.pid`). Stop the API normally (service stop / Ctrl+C) where possible.
+
+Test locally without a camera or cloud account: in Development, a camera source `file:C:\path\sample.ts` loops a file in real time, and `Cloud__Provider=Folder` with `Cloud__FolderPath` copies uploads to a folder. `tests/integration_video.py` does this automatically when `PARKING_FFMPEG` is set.
+
 ## Production preparation
 
 Build the UI with `npm run build` and the API with `dotnet publish -c Release`. Serve `ui/dist` and proxy `/api`, `/parkingHub`, and the administrator-only legacy `/notificationHub` under one HTTPS origin. Configure trusted proxy forwarding and WebSocket support for the actual hosting environment. Production cookies require HTTPS. Keep Swagger/development mode off externally.

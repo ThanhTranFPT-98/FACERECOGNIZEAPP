@@ -15,14 +15,18 @@ export default function Parking() {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [review, setReview] = useState(null), [note, setNote] = useState('')
   const [health, setHealth] = useState(null), [audit, setAudit] = useState([]), [users, setUsers] = useState([]), [history, setHistory] = useState(null)
+  const [cameras, setCameras] = useState(null), [videoFor, setVideoFor] = useState(null)
   const [laneForm] = Form.useForm()
+  const [cameraForm] = Form.useForm()
   const [vehicleForm] = Form.useForm()
+  const loadCameras = async () => { try { setCameras((await api.get(base + '/cameras')).data) } catch { setCameras(null) } }
+  const openVideo = async e => { try { setVideoFor({ event: e, segments: (await api.get(base + '/events/' + e.id + '/video')).data }) } catch { message.error('Video list unavailable') } }
   const refresh = async () => {
     try { setData((await api.get(base + '/snapshot')).data); setError('') }
     catch { setError('Could not load parking records. Check the API connection.') }
   }
   useEffect(() => {
-    refresh()
+    refresh(); if (operator) loadCameras()
     const connection = new signalR.HubConnectionBuilder().withUrl('/parkingHub').withAutomaticReconnect().build()
     connection.on('ParkingChanged', refresh); connection.start().catch(() => {})
     const timer = setInterval(refresh, 10000)
@@ -62,6 +66,7 @@ export default function Parking() {
     {operator && e.outcome === 'ManualReview' && <Button onClick={() => { setReview(e); setNote('') }}>Review</Button>}
     {operator && <Button disabled={e.outcome !== 'Allow' || busy} onClick={() => request('events/' + e.id + '/open')}>Request open</Button>}
     {operator && e.evidenceId && <a href={'/api' + base + '/events/' + e.id + '/evidence'} target="_blank" rel="noreferrer">Evidence</a>}
+    {operator && cameras?.videoEnabled && <Button onClick={() => openVideo(e)}>Video</Button>}
   </Space> }]
   const monitor = <><Alert type="info" showIcon message="Shadow lanes record decisions without opening barriers. Camera results require a validated recognition model or guard review." style={{ marginBottom: 20 }} />
     {operator && <Tabs items={[
@@ -94,6 +99,19 @@ export default function Parking() {
       <Form.Item name="simulation" label="Simulated hardware" valuePropName="checked"><Switch /></Form.Item>
       <Form.Item name="autoOpen" label="Automatically open after an accepted camera observation" valuePropName="checked"><Switch /></Form.Item>
       <Button htmlType="submit" type="primary" loading={busy}>Save lane</Button></Form></>
+  const cameraTab = <>{cameras && <Alert style={{ marginBottom: 16 }} type={cameras.videoEnabled ? 'info' : 'warning'} message={
+      (cameras.videoEnabled ? '24/7 recording is on.' : '24/7 recording is off (Video:Enabled).') + ' ' + (cameras.cloudEnabled ? 'Cloud upload is on. Records waiting: ' + cameras.outboxPending : 'Cloud upload is off (Cloud:Enabled).')} />}
+    {admin && <Form form={cameraForm} layout="vertical" initialValues={{ enabled: true, record24x7: true }} onFinish={async v => { if (await request('cameras', v, 'put')) { cameraForm.resetFields(); loadCameras() } }}>
+      {field('id', 'Camera ID', <Input placeholder="gate-in-1" />)}{field('name', 'Name')}
+      {field('laneId', 'Lane (links events to this camera)', <Select allowClear options={data.lanes.map(l => ({ value: l.id, label: l.id }))} />, false)}
+      {field('source', 'Stream URL (rtsp://user:password@ip/…) — leave empty to keep the saved one', <Input.Password autoComplete="off" />, false)}
+      <Form.Item name="enabled" label="Enabled" valuePropName="checked"><Switch /></Form.Item>
+      <Form.Item name="record24x7" label="Record 24/7" valuePropName="checked"><Switch /></Form.Item>
+      <Space><Button type="primary" htmlType="submit" loading={busy}>Save camera</Button><Button onClick={() => cameraForm.resetFields()}>Clear form</Button></Space>
+    </Form>}
+    <Button style={{ marginTop: 16 }} onClick={loadCameras}>Refresh cameras</Button>
+    {table(cameras?.cameras || [], [...cols(['id', 'name', 'laneId', 'source', 'enabled', 'record24x7', 'lastSegmentUtc', 'pendingUploads', 'oldestPendingUtc']),
+      ...(admin ? [{ title: 'Edit', render: (_, c) => <Button onClick={() => cameraForm.setFieldsValue({ ...c, source: '' })}>Edit</Button> }] : [])])}</>
   const alerts = table(data.alerts, [...cols(['severity', 'reason', 'deliveryAttempts', 'deliveredUtc']), ...(operator ? [{ title: 'Action', render: (_, a) => <Button onClick={() => request('alerts/' + a.id + '/resolve')}>Acknowledge</Button> }] : [])])
   const operations = <><Button onClick={async () => { try { setHealth((await api.get(base + '/health')).data) } catch { message.error('Health check failed') } }}>Check services</Button>
     {health && <Alert style={{ marginTop: 16 }} type={health.database && health.plateAi === 'Ready' ? 'success' : 'warning'} message={'Database: ' + (health.database ? 'Ready' : 'Unavailable') + ' · Plate AI: ' + health.plateAi + ' · Approved model: ' + (health.approvedModel || 'None')} />}
@@ -113,7 +131,8 @@ export default function Parking() {
     <Card><Tabs items={[
       { key: 'monitor', label: 'Lane monitor', children: monitor }, { key: 'vehicles', label: 'Vehicles', children: vehicles },
       { key: 'visitors', label: 'Visitors', children: visitors }, { key: 'alerts', label: 'Alerts', children: alerts },
-      { key: 'devices', label: 'Device health', children: operations }, { key: 'history', label: 'History & audit', children: historyTab },
+      { key: 'devices', label: 'Device health', children: operations },
+      ...(operator ? [{ key: 'cameras', label: 'Cameras & video', children: cameraTab }] : []), { key: 'history', label: 'History & audit', children: historyTab },
       ...(admin ? [{ key: 'lanes', label: 'Lane settings', children: settings }, { key: 'users', label: 'Operators', children: accounts }] : []),
     ]} /></Card>
     <Modal title={review?.reconcile ? 'Confirm physical inspection' : 'Guard review'} open={!!review} onCancel={() => setReview(null)} footer={<Space>
@@ -121,5 +140,12 @@ export default function Parking() {
       {!review?.reconcile && <Button danger disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request('events/' + review.id + '/review', { approve: false, note })) setReview(null) }}>Deny</Button>}
       <Button type="primary" disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request((review.reconcile ? 'commands/' : 'events/') + review.id + (review.reconcile ? '/reconcile' : '/review'), { approve: true, note })) setReview(null) }}>{review?.reconcile ? 'Mark reconciled' : 'Approve'}</Button>
     </Space>}><p>{review?.reconcile ? 'Inspect the controller and lane before clearing an unknown outcome. This never resends the command.' : 'Verify the driver and vehicle. Approval expires after 30 seconds.'}</p>
-    <Input.TextArea aria-label="Review reason" value={note} onChange={e => setNote(e.target.value)} maxLength={500} placeholder="Record your reason" /></Modal></>
+    <Input.TextArea aria-label="Review reason" value={note} onChange={e => setNote(e.target.value)} maxLength={500} placeholder="Record your reason" /></Modal>
+    <Modal title={'Video · ' + (videoFor?.event.plate || 'unknown plate') + ' · ' + (videoFor?.event.createdUtc || '')} open={!!videoFor} onCancel={() => setVideoFor(null)} footer={null} width={900} destroyOnClose>
+      {videoFor && !videoFor.segments.length && <Alert type="warning" message="No recording covers this event. Check that a camera is linked to the lane and was recording." />}
+      {videoFor?.segments.map(s => <div key={s.id} style={{ marginBottom: 16 }}>
+        <Typography.Text strong>{s.cameraId}</Typography.Text> · {s.startUtc} → {s.endUtc} · <Tag>{s.status}</Tag>
+        <video controls preload="metadata" style={{ width: '100%', marginTop: 8 }} src={'/api' + base + '/video/segments/' + s.id + '/play#t=' + Math.floor(s.offsetSeconds)} />
+      </div>)}
+    </Modal></>
 }

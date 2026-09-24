@@ -115,6 +115,39 @@ namespace MyfirstASP_NET.ParkingCore.Migrations
                     b.ToTable("Audit");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Camera", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LaneId")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSegmentUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Record24x7")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Cameras");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.DeviceCommand", b =>
                 {
                     b.Property<Guid>("Id")
@@ -338,6 +371,56 @@ namespace MyfirstASP_NET.ParkingCore.Migrations
                     b.ToTable("Vehicles");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.SyncOutboxItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextAttemptUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SentUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "Id");
+
+                    b.ToTable("Outbox");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VehiclePerson", b =>
                 {
                     b.Property<Guid>("VehicleId")
@@ -349,6 +432,68 @@ namespace MyfirstASP_NET.ParkingCore.Migrations
                     b.HasKey("VehicleId", "PersonId");
 
                     b.ToTable("VehiclePeople");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VideoSegment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CameraId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("EndUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextAttemptUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObjectKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UploadedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CameraId", "FileName")
+                        .IsUnique();
+
+                    b.HasIndex("CameraId", "StartUtc");
+
+                    b.HasIndex("Status", "StartUtc");
+
+                    b.ToTable("VideoSegments");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Visit", b =>

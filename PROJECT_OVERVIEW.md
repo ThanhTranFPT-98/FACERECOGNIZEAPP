@@ -103,7 +103,7 @@ Source: generalised from *Thuyết Minh Hệ Thống Than Uông Bí V2 17.9.26.d
 | --- | --- | --- | --- |
 | GC-01 | **Multi-site, multi-system on one platform.** Hierarchy *Area → Location → Lane/Camera*. Every screen, alert and report can be filtered by area. | ❌ | Lanes are a flat list; no Area/Location entity |
 | GC-02 | **Two tiers: site station + central platform.** Each gate/lot runs locally; results sync to the central server (two-way). | ❌ | Single API process, one DB |
-| GC-03 | **Keep working offline.** If the link to the centre drops, the site keeps operating in a configured local mode, buffers events and evidence, and syncs later **without losing data**. | ❌ | No sync/outbox |
+| GC-03 | **Keep working offline.** If the link to the centre drops, the site keeps operating in a configured local mode, buffers events and evidence, and syncs later **without losing data**. | 🟡 | CR-001: outbox + local video buffer + uploader to cloud. Two-way sync with a central platform not built |
 | GC-04 | **Guard stations at the same gate sync peer-to-peer.** One PC failing must not stop the others. | ⚠️ | Current design is "one API process per site" with an in-process lock (section 17). Needs an architecture decision |
 | GC-05 | **Vendor-neutral input.** Edge devices send one common message format, whatever the camera brand. Each brand gets an adapter. Existing RTSP/ONVIF cameras are reused. | 🟡 | Own OCR + lane worker only. Vendor adapter planned in `THIRD_PARTY_CAMERA_PLAN.md` |
 | GC-06 | **Reuse the customer's existing devices and data**, e.g. face terminals that already hold enrolled workers, and existing barriers. Integrate their *outputs*; don't replace them. | ❌ | Face recognition is our own ArcFace service; no adapter for external face terminals |
@@ -141,7 +141,7 @@ Source: generalised from *Thuyết Minh Hệ Thống Than Uông Bí V2 17.9.26.d
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
 | GC-25 | **Alert lifecycle:** *Open → Acknowledged* (who/when) *→ Resolved* (**note mandatory**) or *False alarm*. False-alarm rate feeds AI tuning. | 🟡 | Only `Resolved` true/false, no note, no false-alarm state |
-| GC-26 | **Every alert** has an ID, type, severity, time, area/lane, image **and video clip** evidence (with the detected box drawn). The UI shows it immediately with **colour by severity and sound**. | 🟡 | Image only, no clip, no sound; colour only on outcome tags |
+| GC-26 | **Every alert** has an ID, type, severity, time, area/lane, image **and video clip** evidence (with the detected box drawn). The UI shows it immediately with **colour by severity and sound**. | 🟡 | CR-001: events link to 24/7 video ±10 s. No drawn boxes, no sound |
 | GC-27 | **Device health** for every camera, edge box, controller: periodic heartbeat; offline after a configurable timeout ⇒ alert. | 🟡 | Lane heartbeat only (30 s) |
 | GC-28 | **Alert types are extensible** per site (unregistered vehicle, mismatch, overstay, intrusion zone, cargo, …). Per-camera sensitivity and confirmation time. | 🟡 | Reasons are free strings in code; no per-camera config |
 | GC-29 | **Live video wall** (grid of RTSP streams, grouped by area) and camera status. | ❌ | Not supported (legacy Monitor uses the browser webcam only) |
@@ -151,7 +151,7 @@ Source: generalised from *Thuyết Minh Hệ Thống Than Uông Bí V2 17.9.26.d
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
 | GC-30 | **Store images at every pass:** plate crop, overview, and optional inspection image. Keep them viewable and downloadable. | 🟡 | One evidence image per event |
-| GC-31 | **Evidence integrity:** SHA-256 hash stored at capture, shown in reports. | ❌ | No hash |
+| GC-31 | **Evidence integrity:** SHA-256 hash stored at capture, shown in reports. | 🟡 | Video segments hashed (stored + uploaded as metadata). Photos not yet; no report |
 | GC-32 | **Configurable retention** with automatic clean-up. | ✅ | `EvidenceRetentionDays` + worker |
 | GC-33 | **Multi-criteria search:** time range / shift / day, area, lane/camera, event type, severity, status, plate/person. | 🟡 | Plate + time + page only |
 | GC-34 | **Excel export** using the current filter. Reference layout has 5 sheets: Overview (who exported, filters, totals, false-alarm rate), Events, By area, Processing performance (mean/median/P95 of transfer time, time to acknowledge, time to close), Evidence (ID, size, SHA-256, retention). | ❌ | Not supported |
@@ -299,6 +299,7 @@ AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane
 | Face AI | `AiService/app/main.py` | FastAPI, PyTorch, SCRFD, ArcFace | 8000 | Needs model weights (not in repo) |
 | Lane worker | `AiService/lane_worker.py` | Python, OpenCV, requests | — | Sends 2–3 frame bursts per interval |
 | Plate evaluation | `AiService/evaluate_plates.py` | Python | — | Measures OCR accuracy on a labelled manifest |
+| Video + cloud sync (CR-001) | `MyfirstASP_NET/ParkingCore/Video.cs`, `VideoController.cs` | C# BackgroundServices + ffmpeg + AWSSDK.S3 | — | 24/7 recorder, ring buffer, outbox, uploader. Off by default (`Video:Enabled`, `Cloud:Enabled`) |
 | Backup | `scripts/backup_sqlite.py` | Python | — | Online SQLite backup |
 | Launcher | `scripts/Start-Parking.ps1` | PowerShell | — | Use this one (not `start-all.bat`) |
 | Tests | `tests/` | C# console tests + Python | — | See section 14 |
@@ -325,6 +326,10 @@ AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane
 | F16 | Device health (DB, OCR, heartbeat state) | *Device health* |
 | F17 | Evidence retention worker | `Maintenance.cs` |
 | F18 | Legacy: face monitor, employees, strangers, access logs, dashboard | legacy pages (admin) |
+| F19 | Cameras: add/edit, encrypted stream URL, recording status | `cameras` / *Cameras & video* |
+| F20 | 24/7 recording to local disk (ring buffer) | `VideoRecorderSupervisor` |
+| F21 | Upload of records, photos and video to S3-compatible cloud (outbox, retry, bandwidth cap) | `CloudUploader` |
+| F22 | Event video playback ±10 s | `events/{id}/video`, `video/segments/{id}/play` / *Video* button |
 
 ## 8. Main workflows
 
@@ -482,6 +487,10 @@ Base URL: `http://localhost:5085`. Every non-GET `/api` call needs the `X-CSRF-T
 | POST | `/api/v1/parking/alerts/{id}/resolve` | Admin, Guard |
 | POST | `/api/v1/parking/commands/{id}/reconcile` | Admin |
 | POST | `/api/v1/parking/commands/{id}/simulate-passage` | Admin, Guard |
+| GET | `/api/v1/parking/cameras` | Admin, Guard |
+| PUT | `/api/v1/parking/cameras` | Admin |
+| GET | `/api/v1/parking/events/{id}/video` | Admin, Guard |
+| GET | `/api/v1/parking/video/segments/{id}/play` (MP4 stream, or redirect to signed cloud URL) | Admin, Guard |
 | POST | `/api/v1/parking/device/capture`, `/capture-burst`, `/heartbeat` | Device key |
 | GET | `/api/v1/parking/device/face-templates` | Device key |
 | — | `/api/Employee`, `/api/Stranger`, `/api/AccessLog`, `/api/Alerts`, `/api/Dashboard`, `/api/embeddings`, `/api/FaceRecognize` | Admin (legacy) |
@@ -519,6 +528,12 @@ Set these through environment variables (`__` = section separator) or user-secre
 | `Parking__AlertWebhookUrl`, `Parking__AlertWebhookKey` | — | HTTPS alerts |
 | `Parking__EvidenceRetentionDays` | 0 (keep) | Auto-delete evidence |
 | `TESSERACT_CMD` | `tesseract` | OCR executable |
+| `Video__Enabled`, `Video__FfmpegPath`, `Video__Directory` | off, `ffmpeg`, `App_Data/video` | 24/7 recorder |
+| `Video__SegmentSeconds`, `Video__LocalQuotaGb`, `Video__MinFreeDiskFraction` | 60, 800, 0.05 | Segment length, local ring-buffer size, last-resort free space |
+| `Video__NtpServer`, `Video__MaxClockDriftSeconds` | empty (off), 2 | Hourly clock check |
+| `Cloud__Enabled`, `Cloud__Provider` | off, `S3` | Outbox + uploader; `Folder` for tests |
+| `Cloud__Endpoint`, `Cloud__Region`, `Cloud__Bucket`, `Cloud__AccessKey`, `Cloud__SecretKey` | — | S3-compatible storage (keys via secret store) |
+| `Cloud__SiteId`, `Cloud__UploadMbpsCap`, `Cloud__BacklogAlertMinutes` | `site`, 0 (no cap), 60 | Key prefix per site, bandwidth cap, backlog alert |
 
 Timing constants (hard-coded, `ParkingService.cs` / `Maintenance.cs`): decision valid 30 s · review window 5 min · lane cooldown 8 s · heartbeat freshness 10 s · offline alert 30 s · maintenance tick 15 s · AI timeout 20 s · device HTTP timeout 5 s.
 
@@ -542,6 +557,7 @@ Logs: `MyfirstASP_NET/App_Data/parking-api*.log`, `parking-ocr*.log`. Demo flow:
 dotnet run --project tests/ParkingCore.Tests
 dotnet run --project tests/ParkingSimulation.Tests
 python tests/integration_parking.py          # needs Debug build of API
+$env:PARKING_FFMPEG='C:\tools\ffmpeg.exe'; python tests/integration_video.py   # CR-001 end-to-end (real ffmpeg, folder "cloud")
 python -m unittest discover -s AiService -p test_plate_service.py -v
 python -m unittest discover -s tests -p test_backup.py -v
 ```
@@ -550,7 +566,7 @@ python -m unittest discover -s tests -p test_backup.py -v
 
 | Tool | Present |
 | --- | --- |
-| dotnet | yes (`C:\Program Files\dotnet`) |
+| dotnet | **runtime 3.1 only, no SDK** in `C:\Program Files\dotnet`. See BUG-007 |
 | node | yes |
 | python | 3.12 |
 | tesseract | **no** |
@@ -579,6 +595,8 @@ python -m unittest discover -s tests -p test_backup.py -v
 
 | ID | Date | Title | Area | Severity | Status |
 | --- | --- | --- | --- | --- | --- |
+| BUG-008 | 2026-09-24 | Hard-killed API leaves ffmpeg recording until next start | Video | Low | By design (mitigated) |
+| BUG-007 | 2026-09-24 | Temporary .NET SDK in %TEMP% partly deleted → build/migrations fail | Env | High | Workaround |
 | BUG-006 | 2026-09-24 | Invalid webhook URL throws on every maintenance tick | Backend / Maintenance | Low | Open |
 | BUG-005 | 2026-09-24 | Face model weights missing | Env / AiService | Medium | Open |
 | BUG-004 | 2026-09-24 | Tesseract not installed → plate OCR 503 | Env / AiService | High | Open |
@@ -604,6 +622,23 @@ python -m unittest discover -s tests -p test_backup.py -v
 - **How to recognise it again:** <error signature an agent can grep for>
 - **Related:** <BUG/CR IDs>
 ```
+
+### BUG-008 — Hard-killed API leaves ffmpeg recording until next start
+- **Area / files:** `ParkingCore/Video.cs` (`VideoRecorderSupervisor.KillLeftover`, `ffmpeg.pid`)
+- **Severity:** Low · **Status:** By design, mitigated
+- **Symptom:** after the API is killed (Task Manager, crash, power-off of the process only), `ffmpeg.exe` processes keep running.
+- **Root cause:** child processes on Windows are not stopped automatically when the parent is killed; a normal shutdown does stop them.
+- **Mitigation:** on the next start the supervisor reads `<video dir>/<camera>/ffmpeg.pid` and kills the leftover before starting a new recorder, so there are never two writers. Recording actually continues during the API outage, which is useful.
+- **Possible improvement:** Windows Job Object so children die with the API (design choice D7 in CR-001).
+
+### BUG-007 — Temporary .NET SDK in %TEMP% partly deleted
+- **Date found:** 2026-09-24 · **Area:** environment
+- **Severity:** High (no build possible) · **Status:** Workaround
+- **Symptom:** `dotnet ef` / running the API fails with `An assembly specified in the application dependencies manifest (Microsoft.AspNetCore.App.deps.json) was not found … Microsoft.Extensions.Configuration.Ini.dll`.
+- **Root cause:** the SDK from an earlier session lives in `%TEMP%\parking-dotnet-sdk`; Windows temp clean-up removed part of its files. `C:\Program Files\dotnet` only has the 3.1 runtime, no SDK.
+- **Workaround used:** fresh SDK 8.0.425 via the official `dotnet-install.ps1` into a session scratch folder (also temporary).
+- **Fix:** install the .NET 8 SDK permanently (e.g. `winget install Microsoft.DotNet.SDK.8`) and stop relying on `%TEMP%`.
+- **How to recognise again:** `deps.json … was not found`, or `dotnet --list-sdks` prints nothing.
 
 ### BUG-001 — Entire parking subsystem is untracked in git
 - **Date found:** 2026-09-24 · **Found by:** agent code review
@@ -658,7 +693,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
-| CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Planned — build plan written, Phase 0 blockers open |
+| CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
 
 ### CR-001 — Store data in the cloud now; central platform deferred
 - **Date / requested by:** 2026-09-24, Than Uông Bí (reported by ThanhTranFPT-98)
@@ -689,7 +724,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
   - **Site-profile settings:** record 24/7 on/off per camera, segment length, local disk quota, cloud endpoint/bucket/keys, retention days, upload bandwidth cap.
   - **Health/alerts:** camera not recording, upload backlog older than X hours, disk above Y %, clock drift.
 
-#### CR-001 build plan (written 2026-09-24, not started)
+#### CR-001 build plan (written 2026-09-24; Phases 1–7 implemented 2026-09-24, see Result below)
 
 Order matters: each phase is usable and testable on its own, and phases 1–4 work **without** a chosen cloud provider (tests use a local stand-in).
 

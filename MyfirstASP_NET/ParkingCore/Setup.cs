@@ -18,12 +18,24 @@ public static class ParkingSetup
     {
         var directory = Path.Combine(builder.Environment.ContentRootPath, "App_Data");
         Directory.CreateDirectory(directory);
+        var cloud = CloudOptions.From(builder.Configuration);
+        var video = VideoOptions.From(builder.Configuration);
+        // The outbox is only filled while cloud sync is enabled, so a site without cloud storage does not accumulate unsent rows.
+        void Outbox(DbContextOptionsBuilder options) { if (cloud.Enabled) options.AddInterceptors(new SyncOutboxInterceptor()); }
         if (builder.Configuration["Parking:Provider"] == "SqlServer")
         {
-            builder.Services.AddDbContext<ParkingSqlServerDb>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("Parking")));
+            builder.Services.AddDbContext<ParkingSqlServerDb>(options => { options.UseSqlServer(builder.Configuration.GetConnectionString("Parking")); Outbox(options); });
             builder.Services.AddScoped<ParkingDb>(services => services.GetRequiredService<ParkingSqlServerDb>());
         }
-        else builder.Services.AddDbContext<ParkingDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Parking") ?? $"Data Source={Path.Combine(directory, "parking.db")}"));
+        else builder.Services.AddDbContext<ParkingDb>(options => { options.UseSqlite(builder.Configuration.GetConnectionString("Parking") ?? $"Data Source={Path.Combine(directory, "parking.db")}"); Outbox(options); });
+        if (cloud.Enabled)
+        {
+            builder.Services.AddSingleton<IObjectStorage>(cloud.Provider == "Folder"
+                ? new FolderObjectStorage(cloud.FolderPath ?? throw new InvalidOperationException("Cloud:FolderPath is required for the Folder provider."))
+                : new S3ObjectStorage(cloud));
+            builder.Services.AddHostedService<CloudUploader>();
+        }
+        if (video.Enabled) builder.Services.AddHostedService<VideoRecorderSupervisor>();
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options => {
                 options.Cookie.Name = "parking-session";
