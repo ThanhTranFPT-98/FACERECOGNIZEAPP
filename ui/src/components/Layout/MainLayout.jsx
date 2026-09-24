@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Layout, Menu, Badge, Avatar, Typography, Space, theme } from 'antd'
+import { Layout, Menu, Badge, Avatar, Typography, Space, theme, Button } from 'antd'
+import { useAuth } from '../../contexts/AuthContext'
 import {
   DashboardOutlined,
   VideoCameraOutlined,
@@ -16,6 +17,7 @@ const { Header, Sider, Content } = Layout
 const { Title, Text } = Typography
 
 const menuItems = [
+  { key: '/parking', icon: <VideoCameraOutlined />, label: 'Parking Access' },
   {
     key: '/dashboard',
     icon: <DashboardOutlined />,
@@ -54,6 +56,7 @@ const menuItems = [
 ]
 
 const MainLayout = ({ children }) => {
+  const { user, logout } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -89,14 +92,14 @@ const MainLayout = ({ children }) => {
           }}
         >
           <Title level={collapsed ? 5 : 4} style={{ margin: 0, color: '#1890ff' }}>
-            {collapsed ? 'FR' : 'Face Recognition'}
+            {collapsed ? 'PA' : 'Parking Access'}
           </Title>
         </div>
         <Menu
           theme="light"
           mode="inline"
           selectedKeys={[currentMenuKey]}
-          items={menuItems.map(item => ({
+          items={menuItems.filter(item => user.role === 'Admin' || item.key === '/parking').map(item => ({
             ...item,
             label: item.key === '/alerts' ? (
               <Badge count={alerts.length} size="small" offset={[10, 0]}>
@@ -129,7 +132,7 @@ const MainLayout = ({ children }) => {
               }}
             />
             <Text type="secondary">
-              {isConnected ? 'Connected' : 'Disconnected'}
+              {user.role !== 'Admin' ? 'Signed in' : isConnected ? 'Face channel connected' : 'Face channel disconnected'}
             </Text>
           </Space>
           <Space>
@@ -137,7 +140,8 @@ const MainLayout = ({ children }) => {
               <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
             </Badge>
             <Avatar style={{ backgroundColor: '#1890ff' }}>A</Avatar>
-            <Text strong>Admin</Text>
+            <Text strong>{user.username} · {user.role}</Text>
+            <Button onClick={logout}>Sign out</Button>
           </Space>
         </Header>
         <Content

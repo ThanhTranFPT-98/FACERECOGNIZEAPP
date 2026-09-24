@@ -159,3 +159,11 @@ MyfirstASP_NET/wwwroot/snapshots/
 *.bak
 *.tmp
 *.orig
+**/App_Data/
+*.db
+*.db-shm
+*.db-wal
+
+# Office lock files and customer documents (keep out of git)
+~$*
+docs/*.docx

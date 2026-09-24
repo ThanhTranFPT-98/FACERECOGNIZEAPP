@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/parkingHub': { target: 'http://localhost:5085', changeOrigin: true, secure: false, ws: true },
       '/api': {
         target: 'http://localhost:5085',
         changeOrigin: true,

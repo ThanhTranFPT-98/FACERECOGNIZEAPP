@@ -1,6 +1,7 @@
 import asyncio
+import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from fastapi import UploadFile, File
@@ -76,7 +77,7 @@ recognizer = iresnet_inference(
     device=device
 )
 
-images_names, images_embs = read_features(feature_path=FEATURE_PATH)
+# Templates are loaded from the authenticated backend; no local NPZ database is required.
 
 camera_worker_task: Optional[asyncio.Task] = None
 is_running = False
@@ -133,8 +134,8 @@ EMBEDDINGS_DB = []
 def load_embeddings_from_api():
     global EMBEDDINGS_DB
 
-    url = "http://localhost:5085/api/embeddings"
-    response = requests.get(url, timeout=10)
+    url = os.getenv("PARKING_API_URL", "http://localhost:5085").rstrip('/') + "/api/v1/parking/device/face-templates"
+    response = requests.get(url, headers={"X-Device-Key": os.getenv("PARKING_DEVICE_KEY", "")}, timeout=10)
     response.raise_for_status()
 
     data = response.json()
@@ -149,13 +150,18 @@ def load_embeddings_from_api():
 
             embedding_list = json.loads(vector_str)
 
-            if not isinstance(embedding_list, list) or len(embedding_list) == 0:
+            if not isinstance(embedding_list, list) or len(embedding_list) != 512:
+                continue
+
+            vector = np.array(embedding_list, dtype=np.float32)
+            norm = np.linalg.norm(vector)
+            if not np.all(np.isfinite(vector)) or not np.isfinite(norm) or norm <= 0:
                 continue
 
             loaded.append({
                 "embedding_id": item.get("id"),
                 "person_id": item.get("peopleId"),
-                "embedding": np.array(embedding_list, dtype=np.float32)
+                "embedding": vector / norm
             })
 
         except Exception as ex:
@@ -291,7 +297,7 @@ def process_one_frame(frame: np.ndarray) -> FrameResultDto:
 
     result = FrameResultDto(
         camera_id="CAM_01",
-        captured_at=datetime.timezone.utc.now().isoformat(),
+        captured_at=datetime.now(timezone.utc).isoformat(),
         total_faces=len(tracked_people),
         recognized_people=tracked_people
     )
@@ -382,7 +388,9 @@ def reload_embeddings():
 async def get_face_embedding(file: UploadFile = File(...)):
     try:
         # đọc file ảnh
-        contents = await file.read()
+        contents = await file.read(5_000_001)
+        if len(contents) > 5_000_000:
+            raise HTTPException(status_code=400, detail="Image exceeds 5 MB")
         np_arr = np.frombuffer(contents, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -397,6 +405,9 @@ async def get_face_embedding(file: UploadFile = File(...)):
                 "face_detected": False,
                 "embedding": None
             }
+
+        if len(bboxes) != 1:
+            raise HTTPException(status_code=400, detail="Enrollment requires exactly one visible face")
 
         # lấy face đầu tiên (demo)
         face = norm_crop(
@@ -413,8 +424,10 @@ async def get_face_embedding(file: UploadFile = File(...)):
             "bbox": [float(x) for x in bboxes[0]]
         }
 
+    except HTTPException:
+        raise
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=str(ex))
+        raise HTTPException(status_code=500, detail="Face embedding failed") from ex
 
 @app.get("/health")
 async def health_check():
@@ -428,8 +441,15 @@ async def health_check():
 @app.post("/face/recognize", response_model = FaceRecognizeResponseDto)
 async def recognize_face_endpoint(file: UploadFile = File(..., alias="Image")):
     try:
+        # Refresh per recognition request so deleted/updated templates are not cached indefinitely.
+        try:
+            await asyncio.to_thread(load_embeddings_from_api)
+        except Exception as ex:
+            raise HTTPException(status_code=503, detail="Face template database unavailable") from ex
         print(f"[Python API] Received request, file: {file.filename}, content-type: {file.content_type}")
-        contents = await file.read()
+        contents = await file.read(5_000_001)
+        if len(contents) > 5_000_000:
+            raise HTTPException(status_code=400, detail="Image exceeds 5 MB")
         print(f"[Python API] File size: {len(contents)} bytes")
         
         np_arr = np.frombuffer(contents, np.uint8)
@@ -486,6 +506,8 @@ async def recognize_face_endpoint(file: UploadFile = File(..., alias="Image")):
         return response
     
 
+    except HTTPException:
+        raise
     except Exception as ex:
         print(f"[Python API] ERROR: {type(ex).__name__}: {str(ex)}")
         raise HTTPException(status_code=500, detail=str(ex))

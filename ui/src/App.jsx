@@ -9,14 +9,16 @@ import Strangers from './pages/Strangers/Strangers'
 import AccessLogs from './pages/AccessLogs/AccessLogs'
 import Alerts from './pages/Alerts/Alerts'
 import Settings from './pages/Settings/Settings'
+import Parking from './pages/Parking/Parking'
+import { AuthProvider } from './contexts/AuthContext'
 
 function App() {
   return (
-    <SignalRProvider>
+    <AuthProvider><SignalRProvider>
       <Router>
         <MainLayout>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Parking />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/employees" element={<Employees />} />
@@ -24,10 +26,11 @@ function App() {
             <Route path="/access-logs" element={<AccessLogs />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/parking" element={<Parking />} />
           </Routes>
         </MainLayout>
       </Router>
-    </SignalRProvider>
+    </SignalRProvider></AuthProvider>
   )
 }
 

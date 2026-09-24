@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
+import { useAuth } from './AuthContext'
 
 const SignalRContext = createContext(null)
 
@@ -12,12 +13,14 @@ export const useSignalR = () => {
 }
 
 export const SignalRProvider = ({ children }) => {
+  const { user } = useAuth()
   const [connection, setConnection] = useState(null)
   const [isConnected, setIsConnected] = useState(false)
   const [recognitionResults, setRecognitionResults] = useState(null)
   const [alerts, setAlerts] = useState([])
 
   useEffect(() => {
+    if (user.role !== 'Admin') return
     const newConnection = new signalR.HubConnectionBuilder()
       .withUrl('/notificationHub')
       .withAutomaticReconnect([0, 2000, 5000, 10000, 20000])
@@ -113,18 +116,6 @@ export const SignalRProvider = ({ children }) => {
         console.log('SignalR Connection Closed', error)
         setIsConnected(false)
         
-        // Auto-restart connection after a delay
-        setTimeout(() => {
-          console.log('SignalR Attempting to restart...')
-          connection.start()
-            .then(() => {
-              console.log('SignalR Restarted successfully!')
-              setIsConnected(true)
-            })
-            .catch((err) => {
-              console.error('SignalR Restart failed:', err)
-            })
-        }, 3000)
       })
     }
   }, [connection])

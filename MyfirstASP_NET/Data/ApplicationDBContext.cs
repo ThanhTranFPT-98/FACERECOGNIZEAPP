@@ -5,15 +5,25 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using MyfirstASP_NET.Interfaces;
 using MyfirstASP_NET.Models;
+using Microsoft.AspNetCore.DataProtection;
 
 namespace MyfirstASP_NET.Data
 {
     public class ApplicationDBContext : DbContext 
     {
-        public ApplicationDBContext(DbContextOptions dbContextOptions)
+        private readonly IDataProtector templateProtector;
+        public ApplicationDBContext(DbContextOptions<ApplicationDBContext> dbContextOptions, IDataProtectionProvider protection)
         : base(dbContextOptions)
         {
+            templateProtector = protection.CreateProtector("Parking.FaceTemplates.v1");
         
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Embedding>().Property(x => x.Vector).HasConversion(
+                vector => "protected:v1:" + templateProtector.Protect(vector),
+                stored => stored.StartsWith("protected:v1:") ? templateProtector.Unprotect(stored.Substring(13)) : stored);
         }
 
         public DbSet<Employee> Employees { get;set; }

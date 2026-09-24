@@ -7,6 +7,18 @@ const api = axios.create({
   },
 })
 
+api.interceptors.request.use(async config => {
+  if (!['get', 'head', 'options'].includes((config.method || 'get').toLowerCase())) {
+    const { data } = await axios.get('/api/auth/csrf')
+    config.headers['X-CSRF-Token'] = data.token
+  }
+  return config
+})
+api.interceptors.response.use(response => response, error => {
+  if (error.response?.status === 401 && !error.config?.url?.includes('/auth/')) window.dispatchEvent(new Event('session-expired'))
+  return Promise.reject(error)
+})
+
 // Dashboard APIs
 export const dashboardApi = {
   getStats: () => api.get('/Dashboard/Stats'),

@@ -4,6 +4,7 @@
 # *.npz
 index.faiss
 test*
+!test_plate_service.py
 # *.ipynb
 NOTE.md
 data-elastic-search

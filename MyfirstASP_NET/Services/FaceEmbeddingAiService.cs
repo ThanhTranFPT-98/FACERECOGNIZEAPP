@@ -33,7 +33,7 @@ namespace MyfirstASP_NET.Services
 
                 var response = await _httpClient.PostAsync("face/embedding", content);
                 var json = await response.Content.ReadAsStringAsync();
-                Console.WriteLine(json);
+                Console.WriteLine($"Face embedding service returned {response.StatusCode}");
 
                 if (!response.IsSuccessStatusCode)
                 {

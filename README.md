@@ -1,5 +1,11 @@
 # Face Recognition System - FaceRecognizeApp
 
+## Parking access application
+
+The project now includes Vietnamese car/motorcycle parking access: authenticated operators, persistent vehicles and visitors, configurable policies, guard review, OCR integration, simulated/controller-bridge commands, passage sessions, alerts and audit.
+
+Start with [Deployment and local startup](docs/DEPLOYMENT.md). See [implementation status](PARKING_IMPLEMENTATION.md), [controller bridge](docs/BARRIER_BRIDGE.md), and [pilot runbook](docs/PILOT_RUNBOOK.md). The original face-recognition notes below describe the existing subsystem; authenticated parking startup additionally requires an initial admin password.
+
 A real-time face recognition and management system consisting of a React frontend, an ASP.NET Core backend, and a Python-based AI service for computer vision tasks.
 
 ## System Architecture

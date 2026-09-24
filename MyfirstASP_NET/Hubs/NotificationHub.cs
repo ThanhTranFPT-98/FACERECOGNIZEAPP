@@ -7,9 +7,11 @@ using Microsoft.AspNetCore.SignalR;
 using MyfirstASP_NET.Dtos.FaceRecognition;
 using MyfirstASP_NET.Interfaces;
 using MyfirstASP_NET.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace MyfirstASP_NET.Hubs
 {
+    [Authorize(Roles = "Admin")]
     public class NotificationHub : Hub
     {
         private readonly IFaceRecognitionService _faceRecognitionService;
