@@ -658,7 +658,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
-| CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Proposed — questions open |
+| CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Planned — build plan written, Phase 0 blockers open |
 
 ### CR-001 — Store data in the cloud now; central platform deferred
 - **Date / requested by:** 2026-09-24, Than Uông Bí (reported by ThanhTranFPT-98)
@@ -688,6 +688,80 @@ Use this section for the customer's new requirements. Write an entry **before** 
   - **Clock sync (NTP) on every PC and camera** is mandatory: events are matched to video by timestamp.
   - **Site-profile settings:** record 24/7 on/off per camera, segment length, local disk quota, cloud endpoint/bucket/keys, retention days, upload bandwidth cap.
   - **Health/alerts:** camera not recording, upload backlog older than X hours, disk above Y %, clock drift.
+
+#### CR-001 build plan (written 2026-09-24, not started)
+
+Order matters: each phase is usable and testable on its own, and phases 1–4 work **without** a chosen cloud provider (tests use a local stand-in).
+
+**Design choices made in this plan (can be revisited):**
+
+| # | Choice | Why | Alternative rejected |
+| --- | --- | --- | --- |
+| D1 | Record with **ffmpeg stream copy** (`-rtsp_transport tcp -c copy -f segment -segment_time 60`) | No re-encoding, so low CPU on the i3/i5 station PC | Re-encoding: heavy CPU, lower quality |
+| D2 | Segment container **MPEG-TS (`.ts`)** or MKV, not MP4 | If ffmpeg or the PC crashes, an unfinished MP4 is unreadable; TS stays playable up to the crash | MP4: fragile on power loss |
+| D3 | File names and `StartUtc` come from the **station PC clock** (ffmpeg `-strftime 1`) | One trusted clock per site (NTP-synced); camera clocks only affect the burned-in overlay | Camera clock: may drift silently |
+| D4 | Only upload **closed** segments, found through ffmpeg's `-segment_list` (CSV) | Never upload a file still being written | Polling the folder: races with the writer |
+| D5 | Storage behind an **`IObjectStorage` interface**; first implementation = S3-compatible (AWS SDK with custom `ServiceURL`), plus a local-folder implementation for tests | Provider is a setting, not code (GC-05, multi-customer) | Provider-specific SDK |
+| D6 | Upload state tracked in the **database** (`VideoSegment.Status`), not in memory | Survives restarts; nothing re-uploaded or forgotten | In-memory queue: lost on crash |
+| D7 | Recorder supervisor runs **inside the API as a `BackgroundService`** for the first version | Reuses config, DB, alerts; one process to deploy (respects "one process per DB") | Separate Windows service: more robust to API restarts but needs a second DB writer. **Revisit after the pilot** |
+| D8 | RTSP URLs (they contain camera passwords) stored **encrypted** with Data Protection, never logged | Same approach as face templates | Plain text in DB/config |
+
+**Phase 0 — Blockers to clear with the customer (no code)**
+- [ ] Choose the provider; confirm it offers **S3-compatible** object storage with a data centre in Vietnam and **lifecycle (auto-delete) rules**.
+- [ ] Measure the real bitrate of each camera model (main stream) → recalculate the upload Mbps and 30-day TB.
+- [ ] Measure the **upload** bandwidth at each site. If it's below the total bitrate, decide: upload the sub-stream only, lower the bitrate, or bigger local disks.
+- [ ] Camera list per site: name, lane, RTSP URL, main/sub stream.
+- [ ] Agree on acceptance targets: max upload backlog (e.g. < 1 h in normal operation), local buffer days, CPU/RAM limits on the station PC.
+- [ ] Install **ffmpeg** on dev/station PCs (not installed on this machine as of 2026-09-24).
+
+**Phase 1 — Data model, settings, camera management**
+- Entities in `ParkingCore/Domain.cs` (or a new `ParkingCore/Video.cs`):
+  - `Camera` (Id, Name, LaneId?, RtspUrlProtected, Record24x7, Enabled, LastSegmentUtc, Status)
+  - `VideoSegment` (Id, CameraId, StartUtc, EndUtc, LocalPath, SizeBytes, Sha256, Status = `Recorded / Uploading / Uploaded / Failed / LocalDeleted`, Attempts, NextAttemptUtc, UploadedUtc, ObjectKey)
+- EF migrations for **both** `ParkingDb` and `ParkingSqlServerDb`.
+- Settings section `Video__*` (FfmpegPath, Directory, SegmentSeconds = 60, LocalQuotaGb, UploadMbpsCap) and `Cloud__*` (Endpoint, Region, Bucket, AccessKey, SecretKey, RetentionDays = 30). Add them to section 13 and `appsettings.Parking.example.json`.
+- Admin-only endpoints + UI tab "Cameras": add/edit/disable a camera, show recording status. Audit every change.
+- ✅ Done when: a camera can be added from the UI while the app runs, survives restart, and its URL isn't readable in the DB or logs.
+
+**Phase 2 — Recorder**
+- `VideoRecorderSupervisor` (`BackgroundService`): one ffmpeg child process per enabled camera. Restart with backoff (2 s → 60 s) on exit. Kill children on shutdown (Windows Job Object so they don't outlive the API).
+- Read each camera's segment list; insert a `VideoSegment` row (status `Recorded`, SHA-256 computed) for every closed file.
+- Alert `CAMERA_NOT_RECORDING:<id>` if no new segment for 3 × SegmentSeconds.
+- Tests: feed ffmpeg a looping local sample file or a local RTSP test server instead of a real camera. Verify segments appear, a killed ffmpeg restarts, and the gap is visible.
+- ✅ Done when: 1 hour of recording from 2 test sources gives ~120 files, correct rows, and a restart mid-way loses at most one segment.
+
+**Phase 3 — Uploader**
+- `IObjectStorage` with `S3ObjectStorage` and `FolderObjectStorage` (tests).
+- `VideoUploader` (`BackgroundService`): oldest `Recorded` first; object key `site/camera/yyyy/MM/dd/HHmmss.ts`; verify size/hash after upload; retry with exponential backoff; bandwidth cap. Event records and evidence photos use the same queue with higher priority, so video never delays them.
+- Alert `UPLOAD_BACKLOG` when the oldest non-uploaded segment is older than the agreed limit.
+- Tests: fake storage failing N times then succeeding; process restarted mid-upload; duplicate upload is harmless (same key).
+- Integration test against a local S3-compatible server (e.g. MinIO) before the real provider.
+- ✅ Done when: pulling the network cable for 30 min produces a backlog alert and then a full catch-up with no missing or duplicate objects.
+
+**Phase 4 — Local ring buffer (disk quota)**
+- Retention job: if usage > LocalQuotaGb, delete the oldest segments with status `Uploaded` → `LocalDeleted`. **Never delete `Recorded`/`Failed`.**
+- If the quota is still exceeded, raise Critical `VIDEO_DISK_FULL`; recording continues until the physical disk is 95 % full, then the oldest *non-uploaded* files are sacrificed **with an audit entry** (policy to confirm with the customer).
+- ✅ Done when: a test with a tiny quota proves uploaded files go first and un-uploaded files survive.
+
+**Phase 5 — Events and photos to the cloud**
+- `SyncOutbox` table written in the **same transaction** as each `AccessEvent` / alert / session change; the uploader sends a JSON document + evidence photo (key = entity id, so a retry is idempotent).
+- ✅ Done when: events created offline appear in the cloud after reconnect, once each.
+
+**Phase 6 — Link events to video, playback**
+- Endpoint `GET /api/v1/parking/events/{id}/video`: find the lane's cameras, return the segments covering `CreatedUtc − 10 s … + 10 s` (local file if still present, otherwise a short-lived signed cloud URL). Audit every view.
+- UI: "Video" button next to "Evidence". Browsers don't play `.ts` directly: use hls.js or remux to MP4 on demand with ffmpeg.
+- ✅ Done when: clicking an event shows the car passing, from local disk and from the cloud.
+
+**Phase 7 — Clock health**
+- Check the station PC's time against NTP at startup and every hour; alert `CLOCK_DRIFT` above 2 s. Camera clock check (ONVIF time) is optional, since D3 makes the PC clock authoritative.
+
+**Phase 8 — Cloud setup, docs, pilot**
+- Configure the bucket's 30-day lifecycle rule at the provider (runbook step; our code does not delete cloud files).
+- Update `DEPLOYMENT.md`, `PILOT_RUNBOOK.md` (disk sizing, bandwidth, restore a clip), section 13 config table, GC-26/GC-29 status.
+- Load test on a real station PC spec (i3, 8 GB) with the site's camera count for 24 h: CPU, RAM, disk I/O, upload backlog.
+- Pilot on one site in parallel with normal operation before relying on it.
+
+**Main risks:** upload bandwidth below the 24/7 bitrate (the biggest one; see Phase 0); a 1 TB disk gives only days of buffer; the station PC is overloaded when face/plate AI also runs there; camera passwords in RTSP URLs; the cloud monthly cost of ~9 TB.
 - **Decision needed:** where 24/7 video is recorded. Options: (A) our app records and uploads all video; (B) a standard recorder (NVR/VMS, or the cameras' own recording) handles 24/7 and our app only links events to timestamps and uploads event clips; (C) hybrid. Recording video 24/7 is a video-management job, not an access-control job.
 - **Design direction (draft):**
   - Code against a **provider-neutral storage interface**. Many Vietnamese providers offer S3-compatible object storage; verify this with the chosen provider. Then switching provider is a configuration change (endpoint + keys + bucket), which fits GC-05 and the multi-customer goal.
