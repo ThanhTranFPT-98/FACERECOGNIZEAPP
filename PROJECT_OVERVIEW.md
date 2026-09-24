@@ -584,7 +584,7 @@ python -m unittest discover -s tests -p test_backup.py -v
 | BUG-004 | 2026-09-24 | Tesseract not installed → plate OCR 503 | Env / AiService | High | Open |
 | BUG-003 | 2026-09-24 | Face camera worker posts to non-existent endpoint | AiService ↔ API | Medium | Open |
 | BUG-002 | 2026-09-24 | `start-all.bat` has hard-coded paths and predates parking auth | Scripts | Medium | Open |
-| BUG-001 | 2026-09-24 | Entire parking subsystem is untracked in git | Repo | **Critical** | Open |
+| BUG-001 | 2026-09-24 | Entire parking subsystem is untracked in git | Repo | **Critical** | Fixed (local commit, not pushed) |
 
 ### Entry template (copy for each new bug)
 
@@ -608,7 +608,7 @@ python -m unittest discover -s tests -p test_backup.py -v
 ### BUG-001 — Entire parking subsystem is untracked in git
 - **Date found:** 2026-09-24 · **Found by:** agent code review
 - **Area / files:** `MyfirstASP_NET/ParkingCore/`, `MyfirstASP_NET/Parking/`, `AiService/plate_service.py`, `lane_worker.py`, `evaluate_plates.py`, `ui/src/pages/Parking/`, `ui/src/contexts/AuthContext.jsx`, `docs/`, `scripts/`, `tests/`, `PARKING_IMPLEMENTATION.md`. Tracked files such as `Program.cs` also have uncommitted edits.
-- **Severity:** Critical · **Status:** Open
+- **Severity:** Critical · **Status:** Fixed locally 2026-09-24 — commit `fba0729` on branch `feature/parking-access`. **Not pushed** to the remote yet, so still no off-machine backup.
 - **Symptom:** `git status` shows these paths as `??`. Git history has only 2 commits, both from the original face app.
 - **Root cause:** Work was done but never committed.
 - **Risk:** One disk failure or a `git clean` / `git checkout .` loses the whole parking app. `Program.cs` already depends on `ParkingCore`, so the committed version doesn't match the files on disk.
@@ -664,12 +664,44 @@ Use this section for the customer's new requirements. Write an entry **before** 
 - **Date / requested by:** 2026-09-24, Than Uông Bí (reported by ThanhTranFPT-98)
 - **Requirement (as reported):** The customer will **not** build the central server/platform now. They want the site data saved **in the cloud** for now, and will build the central platform in the future.
 - **Interpretation (draft, to confirm):** Site stations keep running locally (GC-02/03). Instead of syncing to an on-premise central server, they sync events + evidence to cloud storage. Later the central platform should be able to read/import that data, so the sync format must be the vendor-neutral common format (GC-05), not something tied to one cloud.
+- **Answers so far (2026-09-24):**
+  - Provider: **a Vietnamese cloud provider** (specific provider not chosen yet).
+  - Data to upload: **video** (plus, assumed, event records and images; to confirm).
+  - Data residency: **data must stay in Vietnam.**
+  - Video mode: **continuous 24/7** recording (not only event clips).
+  - Cloud retention: **30 days.**
+  - Event records: may go to the cloud; user also wants events **saved locally** (small storage). Proposed: local-first for events *and* copy to cloud.
+- **Sizing estimate (to verify by measuring real camera bitrate):** at ~2 Mbps per 2 MP camera, 1 camera ≈ 21 GB/day ≈ 650 GB per 30 days. Than Uông Bí ≈ 14 new cameras ⇒ ≈ 28 Mbps **continuous upload** and ≈ 9 TB kept in the cloud. The station PCs have a 1 TB HDD, i.e. only a few days of local video buffer.
+- **Existing recorder:** customer has **no NVR/VMS** (answered 2026-09-24), so 24/7 recording must be supplied as part of this project.
+- **DECIDED 2026-09-24 — Option C1:** our software records at the site, stores on the local disk, then uploads to Vietnamese cloud storage. (Cameras streaming directly to a cloud camera service was rejected: video would be lost during Internet outages.)
+- **Draft design for C1 (not built):**
+  ```text
+  Camera (RTSP) → Recorder (ffmpeg, stream copy, no re-encode) → 1-min segment files on local disk
+                                                                   ↓
+                                  Uploader (outbox + retry) → Vietnamese cloud storage (S3-compatible, 30-day expiry rule)
+  AccessEvent (camera, time) ────────── links to ──────────→ segment(s) covering that time → playback / clip
+  ```
+  - **Recorder:** one process per camera; restarts automatically if the camera drops; records a "gap" when there's no stream.
+  - **Local disk as a ring buffer:** delete the oldest segments **that are already uploaded** first. If the disk fills with un-uploaded video, raise a Critical alert (upload can't keep up or Internet is down too long).
+  - **Uploader:** one queue item per segment file; verifies it arrived (size/hash) before marking it done; bandwidth limit configurable so video never starves event traffic.
+  - **Cloud retention:** use the provider's lifecycle rule (delete after 30 days) rather than our own deletion job, if the provider supports it.
+  - **Clock sync (NTP) on every PC and camera** is mandatory: events are matched to video by timestamp.
+  - **Site-profile settings:** record 24/7 on/off per camera, segment length, local disk quota, cloud endpoint/bucket/keys, retention days, upload bandwidth cap.
+  - **Health/alerts:** camera not recording, upload backlog older than X hours, disk above Y %, clock drift.
+- **Decision needed:** where 24/7 video is recorded. Options: (A) our app records and uploads all video; (B) a standard recorder (NVR/VMS, or the cameras' own recording) handles 24/7 and our app only links events to timestamps and uploads event clips; (C) hybrid. Recording video 24/7 is a video-management job, not an access-control job.
+- **Design direction (draft):**
+  - Code against a **provider-neutral storage interface**. Many Vietnamese providers offer S3-compatible object storage; verify this with the chosen provider. Then switching provider is a configuration change (endpoint + keys + bucket), which fits GC-05 and the multi-customer goal.
+  - Keep a local **outbox**: the gate writes first, then uploads; retry on failure; never block the barrier on the upload (GC-03).
+  - Personal data (faces, plates tied to names) is subject to Vietnamese personal-data rules; the customer's legal/IT side should confirm requirements. Encrypt in transit (HTTPS) and at rest.
 - **Open questions:**
-  1. Which cloud and service? (e.g. customer's own cloud account, a Vietnamese provider, Azure/AWS/Google; database vs file storage)
-  2. What must go to the cloud? Events only, or also images (plate/overview) and video? How long is it kept there?
-  3. Must the gate keep working when the Internet is down? (Assumed **yes**, GC-03.)
-  4. Who reads the cloud data before the central platform exists: nobody (backup only), managers via a web page, or reports?
-  5. Any rule about where data may be stored (inside Vietnam, company-owned only)? Workers' faces are personal data.
+  1. Which provider exactly, and does it offer S3-compatible storage?
+  2. Video: **continuous 24/7 recording**, or **short clips around each event** (e.g. 10 s before/after a pass or alert)? Hugely different cost and bandwidth.
+  3. Also upload event records and photos? (Assumed yes.)
+  4. How long is data kept in the cloud (days/months)?
+  5. Upload bandwidth available at each site?
+  6. Who reads the cloud data before the central platform exists: nobody (backup only), managers via a web page, or reports?
+  7. Must the gate keep working when the Internet is down? (Assumed **yes**, GC-03.)
+- **New gap exposed:** the app currently **records no video at all** (GC-26, GC-29). Video capture from the RTSP cameras is a prerequisite for this CR.
 - **Impacted components (expected):** new outbox table + sync worker in the API, evidence upload, configuration for cloud credentials, docs.
 - **Status:** Proposed
 
