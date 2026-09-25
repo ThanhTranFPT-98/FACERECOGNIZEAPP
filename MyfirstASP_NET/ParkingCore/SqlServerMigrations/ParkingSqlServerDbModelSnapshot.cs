@@ -28,6 +28,9 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("CapturedUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("CorrelationId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -39,6 +42,10 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<string>("EvidenceId")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("EvidenceSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime>("ExpiresUtc")
                         .HasColumnType("datetime2");
 
@@ -47,7 +54,7 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
 
                     b.Property<string>("LaneId")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("ModelVersion")
                         .IsRequired()
@@ -67,15 +74,30 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<double>("PlateConfidence")
                         .HasColumnType("float");
 
+                    b.Property<string>("PpeOutcome")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("PpeSummary")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ReceivedUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ReviewBy")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ReviewNote")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Shift")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
 
                     b.Property<string>("Source")
                         .IsRequired()
@@ -91,7 +113,41 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
 
                     b.HasIndex("CreatedUtc");
 
+                    b.HasIndex("LaneId", "CreatedUtc");
+
                     b.ToTable("Events");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Area", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("OverstayMinutes")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Areas");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.AuditEntry", b =>
@@ -122,6 +178,31 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.ToTable("Audit");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.AuthorizedPerson", b =>
+                {
+                    b.Property<int>("PersonId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("ValidUntilUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("PersonId");
+
+                    b.ToTable("People");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Camera", b =>
                 {
                     b.Property<string>("Id")
@@ -131,9 +212,20 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("bit");
 
+                    b.Property<string>("ExternalChannel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ExternalDevice")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<string>("LaneId")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("LastMessageUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("LastSegmentUtc")
                         .HasColumnType("datetime2");
@@ -146,13 +238,84 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<bool>("Record24x7")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("SilentAlertSeconds")
+                        .HasColumnType("int");
+
                     b.Property<string>("SourceProtected")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<double?>("TrustedConfidence")
+                        .HasColumnType("float");
+
+                    b.Property<string>("WallSourceProtected")
+                        .HasColumnType("nvarchar(max)");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("ExternalDevice");
+
                     b.ToTable("Cameras");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.CameraInbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Adapter")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("AdapterVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Observations")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("ProcessedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ReceivedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RemoteIp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PayloadSha256");
+
+                    b.HasIndex("Status", "Id");
+
+                    b.ToTable("CameraInbox");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.DeviceCommand", b =>
@@ -160,6 +323,9 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AckUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("datetime2");
@@ -186,6 +352,49 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.ToTable("Commands");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.EvidenceImage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("TakenBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId");
+
+                    b.ToTable("EvidenceImages");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Lane", b =>
                 {
                     b.Property<string>("Id")
@@ -199,18 +408,36 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("CooldownSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("DecisionValidSeconds")
+                        .HasColumnType("int");
+
                     b.Property<string>("Direction")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("ExitRequiresEntry")
+                        .HasColumnType("bit");
+
                     b.Property<double>("FaceThreshold")
                         .HasColumnType("float");
+
+                    b.Property<int?>("HeartbeatFreshSeconds")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("LastHeartbeatUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("Obstructed")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("OfflineAlertSeconds")
+                        .HasColumnType("int");
 
                     b.Property<double>("PlateThreshold")
                         .HasColumnType("float");
@@ -218,6 +445,21 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<string>("Policy")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PpeMissingMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("PpeRules")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("RequireInspectionPhoto")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ReviewWindowSeconds")
+                        .HasColumnType("int");
 
                     b.Property<bool>("SafetyHealthy")
                         .HasColumnType("bit");
@@ -228,12 +470,41 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<bool>("Simulation")
                         .HasColumnType("bit");
 
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<bool>("VehiclePresent")
                         .HasColumnType("bit");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LocationId");
+
                     b.ToTable("Lanes");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Location", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("Locations");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.ParkingAlert", b =>
@@ -241,6 +512,13 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AcknowledgedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("AcknowledgedUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("datetime2");
@@ -261,15 +539,27 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("Resolved")
                         .HasColumnType("bit");
 
                     b.Property<string>("ResolvedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("ResolvedUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.HasKey("Id");
 
@@ -286,6 +576,9 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
 
                     b.Property<Guid>("EntryCommandId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("EntryPersonId")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("EntryUtc")
                         .HasColumnType("datetime2");
@@ -317,6 +610,9 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.Property<bool>("Active")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("ExpiresUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -338,6 +634,75 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.PresenceRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AreaCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LaneId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("PassageUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Shift")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("StationId")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("SubjectKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("SubjectName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("AreaCode", "PassageUtc");
+
+                    b.HasIndex("StationId", "Id");
+
+                    b.ToTable("Presence");
+                });
+
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.RegisteredVehicle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -349,6 +714,11 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
 
                     b.Property<bool>("Blocked")
                         .HasColumnType("bit");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -370,12 +740,153 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("ValidUntilUtc")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.HasIndex("NormalizedPlate")
                         .IsUnique();
 
                     b.ToTable("Vehicles");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Role", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("SeedVersion")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Roles");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.RolePermission", b =>
+                {
+                    b.Property<string>("RoleId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Permission")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.HasKey("RoleId", "Permission");
+
+                    b.ToTable("RolePermissions");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Shift", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("End")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Start")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.ToTable("Shifts");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.SiteSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CooldownSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DecisionValidSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int>("HeartbeatFreshSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MergeWindowSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OfflineAlertSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PlatePatterns")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("PpeConfirmCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PpeWindowSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReviewCategories")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ReviewWindowSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("WalkInResetHour")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SiteSettings");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.SyncCursor", b =>
+                {
+                    b.Property<string>("Peer")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long>("LastId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("LastKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Peer");
+
+                    b.ToTable("SyncCursors");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.SyncOutboxItem", b =>
@@ -428,6 +939,21 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.HasIndex("Status", "Id");
 
                     b.ToTable("Outbox");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.UserArea", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("UserId", "AreaId");
+
+                    b.HasIndex("AreaId");
+
+                    b.ToTable("UserAreas");
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VehiclePerson", b =>
@@ -521,6 +1047,11 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<int>("MaxEntries")
                         .HasColumnType("int");
 
@@ -541,6 +1072,56 @@ namespace MyfirstASP_NET.ParkingCore.SqlServerMigrations
                     b.HasKey("Id");
 
                     b.ToTable("Visits");
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Lane", b =>
+                {
+                    b.HasOne("MyfirstASP_NET.ParkingCore.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Location", b =>
+                {
+                    b.HasOne("MyfirstASP_NET.ParkingCore.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.RolePermission", b =>
+                {
+                    b.HasOne("MyfirstASP_NET.ParkingCore.Role", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.Shift", b =>
+                {
+                    b.HasOne("MyfirstASP_NET.ParkingCore.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MyfirstASP_NET.ParkingCore.UserArea", b =>
+                {
+                    b.HasOne("MyfirstASP_NET.ParkingCore.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MyfirstASP_NET.ParkingCore.ParkingUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("MyfirstASP_NET.ParkingCore.VehiclePerson", b =>

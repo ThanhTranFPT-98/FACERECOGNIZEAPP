@@ -15,43 +15,44 @@ import { useSignalR } from '../../contexts/SignalRContext'
 
 const { Header, Sider, Content } = Layout
 const { Title, Text } = Typography
+import { t, getLang, setLang } from '../../i18n'
 
 const menuItems = [
-  { key: '/parking', icon: <VideoCameraOutlined />, label: 'Parking Access' },
+  { key: '/parking', icon: <VideoCameraOutlined />, label: t('Parking Access') },
   {
     key: '/dashboard',
     icon: <DashboardOutlined />,
-    label: 'Dashboard',
+    label: t('Dashboard'),
   },
   {
     key: '/monitor',
     icon: <VideoCameraOutlined />,
-    label: 'Monitor',
+    label: t('Monitor'),
   },
   {
     key: '/employees',
     icon: <TeamOutlined />,
-    label: 'Employees',
+    label: t('Employees'),
   },
   {
     key: '/strangers',
     icon: <UserAddOutlined />,
-    label: 'Strangers',
+    label: t('Strangers'),
   },
   {
     key: '/access-logs',
     icon: <FileTextOutlined />,
-    label: 'Access Logs',
+    label: t('Access Logs'),
   },
   {
     key: '/alerts',
     icon: <BellOutlined />,
-    label: 'Alerts',
+    label: t('Alerts'),
   },
   {
     key: '/settings',
     icon: <SettingOutlined />,
-    label: 'Settings',
+    label: t('Settings'),
   },
 ]
 
@@ -132,7 +133,7 @@ const MainLayout = ({ children }) => {
               }}
             />
             <Text type="secondary">
-              {user.role !== 'Admin' ? 'Signed in' : isConnected ? 'Face channel connected' : 'Face channel disconnected'}
+              {t(user.role !== 'Admin' ? 'Signed in' : isConnected ? 'Face channel connected' : 'Face channel disconnected')}
             </Text>
           </Space>
           <Space>
@@ -140,8 +141,9 @@ const MainLayout = ({ children }) => {
               <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
             </Badge>
             <Avatar style={{ backgroundColor: '#1890ff' }}>A</Avatar>
-            <Text strong>{user.username} · {user.role}</Text>
-            <Button onClick={logout}>Sign out</Button>
+            <Text strong>{user.username} · {t(user.role)}</Text>
+            <Button size="small" onClick={() => setLang(getLang() === 'vi' ? 'en' : 'vi')} title={t('Language')}>{getLang() === 'vi' ? 'EN' : 'VI'}</Button>
+            <Button onClick={logout}>{t('Sign out')}</Button>
           </Space>
         </Header>
         <Content

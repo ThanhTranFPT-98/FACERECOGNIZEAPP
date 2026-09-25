@@ -16,10 +16,15 @@ public class CameraInput
     [StringLength(500)] public string? Source { get; set; }
     public bool Enabled { get; set; } = true;
     public bool Record24x7 { get; set; } = true;
+    [StringLength(40)] public string? ExternalDevice { get; set; }
+    [StringLength(20)] public string? ExternalChannel { get; set; }
+    [Range(0.01, 1)] public double? TrustedConfidence { get; set; }
+    [StringLength(500)] public string? WallSource { get; set; }
+    [Range(30, 86400)] public int? SilentAlertSeconds { get; set; }
 }
 
-[ApiController, Route("api/v1/parking"), Authorize(Roles = "Admin,Guard")]
-public class VideoController(ParkingDb db, IDataProtectionProvider protection, IConfiguration config, IWebHostEnvironment environment, IServiceProvider services) : ControllerBase
+[ApiController, Route("api/v1/parking"), Authorize(Policy = Perm.ViewEvidence)]
+public class VideoController(ParkingDb db, IDataProtectionProvider protection, IConfiguration config, IWebHostEnvironment environment, IServiceProvider services, AreaScope scope) : ControllerBase
 {
     private string Actor => User.Identity?.Name ?? "unknown";
     private string VideoRoot => VideoOptions.From(config).ResolveDirectory(environment);
@@ -30,20 +35,23 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
         var protector = protection.CreateProtector(CameraProtection.Purpose);
         var pending = await db.VideoSegments.Where(x => x.Status == "Recorded" || x.Status == "Failed").GroupBy(x => x.CameraId)
             .Select(g => new { CameraId = g.Key, Count = g.Count(), Oldest = g.Min(x => x.StartUtc) }).ToListAsync();
-        var cameras = await db.Cameras.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+        var allowed = await scope.Lanes();
+        // A camera without a lane belongs to no area, so only accounts without area limits see it.
+        var cameras = (await db.Cameras.AsNoTracking().OrderBy(x => x.Id).ToListAsync()).Where(c => allowed is null || (c.LaneId is not null && allowed.Contains(c.LaneId))).ToList();
         return new {
             videoEnabled = VideoOptions.From(config).Enabled, cloudEnabled = CloudOptions.From(config).Enabled,
             outboxPending = await db.Outbox.CountAsync(x => x.Status != "Sent"),
-            cameras = cameras.Select(c => new { c.Id, c.Name, c.LaneId, c.Enabled, c.Record24x7, c.LastSegmentUtc, source = Mask(protector, c.SourceProtected),
+            cameras = cameras.Select(c => new { c.Id, c.Name, c.LaneId, c.Enabled, c.Record24x7, c.LastSegmentUtc, source = c.SourceProtected.Length == 0 ? "" : Mask(protector, c.SourceProtected),
+                c.ExternalDevice, c.ExternalChannel, c.TrustedConfidence, c.LastMessageUtc, c.SilentAlertSeconds, wallSource = c.WallSourceProtected is null ? "" : Mask(protector, c.WallSourceProtected),
                 pendingUploads = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Count ?? 0, oldestPendingUtc = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Oldest })
         };
     }
 
-    [HttpPut("cameras"), Authorize(Roles = "Admin")]
+    [HttpPut("cameras"), Authorize(Policy = Perm.ManageSite)]
     public async Task<IActionResult> SaveCamera(CameraInput input)
     {
         var camera = await db.Cameras.FindAsync(input.Id);
-        if (camera is null && string.IsNullOrWhiteSpace(input.Source)) return Conflict(new { message = "A new camera needs a stream source (rtsp://…)." });
+        if (camera is null && string.IsNullOrWhiteSpace(input.Source) && string.IsNullOrWhiteSpace(input.ExternalDevice)) return Conflict(new { message = "A new camera needs a stream source (rtsp://…) or an AI device ID." });
         if (input.LaneId is not null && !await db.Lanes.AnyAsync(x => x.Id == input.LaneId)) return Conflict(new { message = "Unknown lane." });
         if (!string.IsNullOrWhiteSpace(input.Source))
         {
@@ -54,7 +62,16 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
             if (camera is null) { camera = new Camera { Id = input.Id }; db.Cameras.Add(camera); }
             camera.SourceProtected = protection.CreateProtector(CameraProtection.Purpose).Protect(source);
         }
-        camera!.Name = input.Name.Trim(); camera.LaneId = string.IsNullOrWhiteSpace(input.LaneId) ? null : input.LaneId;
+        if (camera is null) { camera = new Camera { Id = input.Id, Record24x7 = false }; db.Cameras.Add(camera); }
+        camera.ExternalDevice = string.IsNullOrWhiteSpace(input.ExternalDevice) ? null : T1550Adapter.Normalize(input.ExternalDevice);
+        camera.ExternalChannel = string.IsNullOrWhiteSpace(input.ExternalChannel) ? null : input.ExternalChannel.Trim();
+        camera.TrustedConfidence = input.TrustedConfidence; camera.SilentAlertSeconds = input.SilentAlertSeconds;
+        if (!string.IsNullOrWhiteSpace(input.WallSource))
+        {
+            if (!input.WallSource.Trim().StartsWith("rtsp", StringComparison.OrdinalIgnoreCase)) return Conflict(new { message = "The wall stream must be rtsp:// or rtsps://." });
+            camera.WallSourceProtected = protection.CreateProtector(CameraProtection.Purpose).Protect(input.WallSource.Trim());
+        }
+        camera.Name = input.Name.Trim(); camera.LaneId = string.IsNullOrWhiteSpace(input.LaneId) ? null : input.LaneId;
         camera.Enabled = input.Enabled; camera.Record24x7 = input.Record24x7;
         db.Log(Actor, "SaveCamera", camera.Id);
         await db.SaveChangesAsync();
@@ -67,6 +84,7 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
     {
         var entry = await db.Events.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id);
         if (entry is null) return NotFound();
+        if (!await scope.Allows(entry.LaneId)) return StatusCode(403, new { message = new AreaForbiddenException().Message });
         var from = entry.CreatedUtc.AddSeconds(-10); var until = entry.CreatedUtc.AddSeconds(10);
         var cameras = await db.Cameras.AsNoTracking().Where(x => x.LaneId == entry.LaneId).Select(x => x.Id).ToListAsync();
         var segments = await db.VideoSegments.AsNoTracking()
@@ -81,6 +99,8 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
     {
         var segment = await db.VideoSegments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id);
         if (segment is null) return NotFound();
+        var cameraLane = await db.Cameras.Where(x => x.Id == segment.CameraId).Select(x => x.LaneId).SingleOrDefaultAsync();
+        if (!await scope.Allows(cameraLane)) return StatusCode(403, new { message = new AreaForbiddenException().Message });
         db.Log(Actor, "ViewVideo", id); await db.SaveChangesAsync();
         Response.Headers.CacheControl = "no-store";
         var path = Path.Combine(VideoRoot, segment.CameraId, segment.FileName);

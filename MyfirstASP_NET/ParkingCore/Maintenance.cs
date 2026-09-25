@@ -28,12 +28,42 @@ public sealed class ParkingMaintenance(IServiceScopeFactory scopes, IConfigurati
         await mutex.Gate.WaitAsync(stop);
         try
         {
-            var cutoff = DateTime.UtcNow.AddSeconds(-30);
-            foreach (var lane in await db.Lanes.Where(x => !x.Simulation && (x.LastHeartbeatUtc == null || x.LastHeartbeatUtc < cutoff)).ToListAsync(stop))
+            var site = await db.Site(stop);
+            var checkedAt = DateTime.UtcNow;
+            foreach (var lane in await db.Lanes.Where(x => !x.Simulation).ToListAsync(stop))
             {
+                // Each lane may have its own offline threshold (GC-44), so the cutoff is evaluated per lane.
+                if (lane.LastHeartbeatUtc is DateTime seen && checkedAt - seen <= LaneTimings.Resolve(site, lane).OfflineAlert) continue;
                 var reason = "DEVICE_OFFLINE:" + lane.Id;
                 if (!await db.Alerts.AnyAsync(x => x.Reason == reason && !x.Resolved, stop)) db.Alerts.Add(new() { Reason = reason, Severity = "High" });
             }
+            // GC-27: AI devices that went silent.
+            foreach (var camera in await db.Cameras.Where(x => x.Enabled && x.SilentAlertSeconds != null && x.ExternalDevice != null).ToListAsync(stop))
+            {
+                var reason = "CAMERA_SILENT:" + camera.Id;
+                var silent = camera.LastMessageUtc is null || (DateTime.UtcNow - camera.LastMessageUtc.Value).TotalSeconds > camera.SilentAlertSeconds;
+                var open = await db.Alerts.Where(x => x.Reason == reason && !x.Resolved).ToListAsync(stop);
+                if (silent && open.Count == 0) db.Alerts.Add(new() { Reason = reason, Severity = "High" });
+                if (!silent) foreach (var alert in open) AlertLifecycle.AutoResolve(alert, "maintenance", "Device is sending again.");
+            }
+            // GC-19: overstay per area.
+            var overstayAreas = await db.Areas.Where(a => a.OverstayMinutes != null).ToListAsync(stop);
+            if (overstayAreas.Count > 0)
+            {
+                var codes = overstayAreas.Select(a => a.Code).ToList();
+                var (inside, _) = PresenceBook.Compute(await PresenceBook.Window(db, DateTime.UtcNow).Where(x => codes.Contains(x.AreaCode)).ToListAsync(stop));
+                foreach (var person in inside)
+                {
+                    var limit = overstayAreas.First(a => a.Code == person.AreaCode).OverstayMinutes!.Value;
+                    if ((DateTime.UtcNow - person.SinceUtc).TotalMinutes <= limit) continue;
+                    var reason = "OVERSTAY:" + person.AreaCode + ":" + person.SubjectKey + ":" + person.SinceUtc.ToString("yyyyMMddHHmm");
+                    if (!await db.Alerts.AnyAsync(x => x.Reason == reason, stop)) db.Alerts.Add(new() { Reason = reason, Severity = "High" });
+                }
+            }
+            // Camera inbox: drop the raw payload (base64 images) 7 days after processing; failed messages are kept 30 days for diagnosis.
+            var processedBefore = DateTime.UtcNow.AddDays(-7); var failedBefore = DateTime.UtcNow.AddDays(-30);
+            foreach (var item in await db.CameraInbox.Where(x => x.Payload != null && x.ProcessedUtc != null
+                && ((x.Status != "Failed" && x.ProcessedUtc < processedBefore) || x.ProcessedUtc < failedBefore)).Take(200).ToListAsync(stop)) item.Payload = null;
             var days = config.GetValue<int>("Parking:EvidenceRetentionDays");
             if (days > 0)
             {
@@ -74,9 +104,9 @@ public sealed class ParkingMaintenance(IServiceScopeFactory scopes, IConfigurati
     }
 }
 [ApiController, Route("api/v1/parking/health")]
-public class ParkingHealthController(ParkingDb db, IHttpClientFactory clients, IConfiguration config) : ControllerBase
+public class ParkingHealthController(ParkingDb db, IHttpClientFactory clients, IConfiguration config, AreaScope scope) : ControllerBase
 {
-    [HttpGet, Authorize(Roles = "Admin,Guard,Auditor")]
+    [HttpGet, Authorize(Policy = Perm.ViewLive)]
     public async Task<object> Get()
     {
         var ai = "Unavailable";
@@ -87,6 +117,10 @@ public class ParkingHealthController(ParkingDb db, IHttpClientFactory clients, I
             ai = response.IsSuccessStatusCode ? "Ready" : "NotReady";
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { }
-        return new { database = await db.Database.CanConnectAsync(), plateAi = ai, liveBarrierEnabled = config.GetValue<bool>("Parking:EnableLiveBarrier"), approvedModel = config["Parking:ApprovedPlateModel"], lanes = await db.Lanes.AsNoTracking().ToListAsync() };
+        var allowed = (await scope.Lanes())?.ToList();
+        var inbox = await db.CameraInbox.GroupBy(x => x.Status).Select(g => new { status = g.Key, count = g.Count(), last = g.Max(x => x.ReceivedUtc) }).ToListAsync();
+        var inboxErrors = await db.CameraInbox.AsNoTracking().Where(x => x.Status == "Failed").OrderByDescending(x => x.Id).Take(5)
+            .Select(x => new { x.Id, x.Adapter, x.ReceivedUtc, x.Error }).ToListAsync();
+        return new { inbox, inboxErrors, database = await db.Database.CanConnectAsync(), plateAi = ai, liveBarrierEnabled = config.GetValue<bool>("Parking:EnableLiveBarrier"), approvedModel = config["Parking:ApprovedPlateModel"], lanes = await db.Lanes.AsNoTracking().Where(x => allowed == null || allowed.Contains(x.Id)).ToListAsync() };
     }
 }

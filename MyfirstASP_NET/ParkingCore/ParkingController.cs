@@ -14,6 +14,15 @@ public class VehicleInput
     [MaxLength(20)] public int[]? AdditionalPersonIds { get; set; }
     public bool Active { get; set; } = true;
     public bool Blocked { get; set; }
+    [RegularExpression("^(Registered|Guest|Delivery)$")] public string Category { get; set; } = "Registered";
+    public DateTimeOffset? ValidUntilUtc { get; set; }
+}
+public class WalkInInput
+{
+    [Required, StringLength(24)] public string Plate { get; set; } = "";
+    [Required, StringLength(100)] public string Name { get; set; } = "";
+    [StringLength(100)] public string Host { get; set; } = "";
+    [Range(1, 100)] public int MaxEntries { get; set; } = 10;
 }
 public class VisitInput
 {
@@ -34,6 +43,18 @@ public class LaneInput
     public bool ShadowMode { get; set; } = true;
     public bool Simulation { get; set; } = true;
     public bool AutoOpen { get; set; }
+    public Guid? LocationId { get; set; }
+    // Optional overrides of the site timings (GC-44); same bounds as TimingInput, null = site default.
+    [Range(5, 300)] public int? DecisionValidSeconds { get; set; }
+    [Range(30, 3600)] public int? ReviewWindowSeconds { get; set; }
+    [Range(2, 120)] public int? CooldownSeconds { get; set; }
+    [Range(2, 60)] public int? HeartbeatFreshSeconds { get; set; }
+    [Range(10, 600)] public int? OfflineAlertSeconds { get; set; }
+    [RegularExpression("^(Vehicle|Person)$")] public string Subject { get; set; } = "Vehicle";
+    [StringLength(300)] public string? PpeRules { get; set; }
+    [RegularExpression("^(Review|AllowAlert)$")] public string PpeMissingMode { get; set; } = "Review";
+    public bool ExitRequiresEntry { get; set; }
+    public bool RequireInspectionPhoto { get; set; }
 }
 public class SimulatedObservation
 {
@@ -60,43 +81,61 @@ public class HeartbeatInput
     public bool Tailgating { get; set; }
 }
 
-[ApiController, Route("api/v1/parking"), Authorize(Roles = "Admin,Guard,Auditor")]
-public class ParkingController(ParkingDb db, ParkingService service, ParkingLock mutex, IWebHostEnvironment environment, IConfiguration config) : ControllerBase
+[ApiController, Route("api/v1/parking"), Authorize(Policy = Perm.ViewLive)]
+public class ParkingController(ParkingDb db, ParkingService service, ParkingLock mutex, IWebHostEnvironment environment, IConfiguration config, AreaScope scope) : ControllerBase
 {
     private string Actor => User.Identity?.Name ?? "unknown";
+    // Vehicles and visitor passes are site-wide; everything tied to a lane is limited to the account's areas (CR-005).
     [HttpGet("snapshot")]
-    public async Task<object> Snapshot() => new {
-        vehicles = await db.Vehicles.AsNoTracking().Include(x => x.AuthorizedPeople).OrderBy(x => x.Plate).ToListAsync(),
-        visits = await db.Visits.AsNoTracking().OrderByDescending(x => x.UntilUtc).Take(200).ToListAsync(),
-        lanes = await db.Lanes.AsNoTracking().ToListAsync(),
-        events = await db.Events.AsNoTracking().OrderByDescending(x => x.CreatedUtc).Take(100).ToListAsync(),
-        commands = await db.Commands.AsNoTracking().OrderByDescending(x => x.CreatedUtc).Take(100).ToListAsync(),
-        alerts = await db.Alerts.AsNoTracking().Where(x => !x.Resolved).OrderByDescending(x => x.CreatedUtc).Take(100).ToListAsync()
-        , sessions = await db.Sessions.AsNoTracking().OrderByDescending(x => x.EntryUtc).Take(200).ToListAsync()
-    };
+    public async Task<object> Snapshot()
+    {
+        var allowed = (await scope.Lanes())?.ToList();
+        var events = db.Events.AsNoTracking(); var commands = db.Commands.AsNoTracking(); var sessions = db.Sessions.AsNoTracking();
+        var alerts = await db.Alerts.AsNoTracking().Where(x => !x.Resolved).OrderByDescending(x => x.CreatedUtc).Take(allowed is null ? 100 : 1000).ToListAsync();
+        if (allowed is not null)
+        {
+            events = events.Where(x => allowed.Contains(x.LaneId)); commands = commands.Where(x => allowed.Contains(x.LaneId));
+            sessions = sessions.Where(s => db.Commands.Any(c => c.Id == s.EntryCommandId && allowed.Contains(c.LaneId)));
+            var eventIds = alerts.Where(x => x.EventId.HasValue).Select(x => x.EventId!.Value).ToList();
+            var eventLanes = await db.Events.Where(x => eventIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.LaneId);
+            alerts = alerts.Where(a => AreaScope.AlertLane(a, eventLanes) is string lane && allowed.Contains(lane)).Take(100).ToList();
+        }
+        return new {
+            vehicles = await db.Vehicles.AsNoTracking().Include(x => x.AuthorizedPeople).OrderBy(x => x.Plate).ToListAsync(),
+            visits = await db.Visits.AsNoTracking().OrderByDescending(x => x.UntilUtc).Take(200).ToListAsync(),
+            lanes = await db.Lanes.AsNoTracking().Where(x => allowed == null || allowed.Contains(x.Id)).ToListAsync(),
+            events = await events.OrderByDescending(x => x.CreatedUtc).Take(100).ToListAsync(),
+            commands = await commands.OrderByDescending(x => x.CreatedUtc).Take(100).ToListAsync(),
+            alerts,
+            sessions = await sessions.OrderByDescending(x => x.EntryUtc).Take(200).ToListAsync()
+        };
+    }
     [HttpGet("events")]
-    public async Task<object> Events(string? plate, DateTime? from, DateTime? until, int page = 1)
+    public async Task<object> Events(string? plate, DateTime? from, DateTime? until, Guid? areaId, int page = 1)
     {
         var query = db.Events.AsNoTracking().AsQueryable();
+        if ((await scope.Lanes())?.ToList() is { } allowed) query = query.Where(x => allowed.Contains(x.LaneId));
+        if (areaId.HasValue) { var laneIds = AreaCatalog.LaneIds(db, areaId.Value); query = query.Where(x => laneIds.Contains(x.LaneId)); }
         if (!string.IsNullOrWhiteSpace(plate)) { var normalized = VietnamPlate.Normalize(plate); query = query.Where(x => x.Plate == normalized); }
         if (from.HasValue) query = query.Where(x => x.CreatedUtc >= from.Value);
         if (until.HasValue) query = query.Where(x => x.CreatedUtc < until.Value);
         return new { total = await query.CountAsync(), items = await query.OrderByDescending(x => x.CreatedUtc).Skip((Math.Clamp(page, 1, 100000) - 1) * 50).Take(50).ToListAsync() };
     }
-    [HttpGet("audit"), Authorize(Roles = "Admin,Auditor")]
+    [HttpGet("audit"), Authorize(Policy = Perm.ViewAudit)]
     public async Task<object> Audit(int page = 1) => await db.Audit.AsNoTracking().OrderByDescending(x => x.Id).Skip((Math.Clamp(page, 1, 100000) - 1) * 50).Take(50).ToListAsync();
 
-    [HttpPost("vehicles"), Authorize(Roles = "Admin")]
+    [HttpPost("vehicles"), Authorize(Policy = Perm.ManageVehicles)]
     public Task<IActionResult> AddVehicle(VehicleInput input) => UpdateVehicle(null, input);
-    [HttpPut("vehicles/{id:guid}"), Authorize(Roles = "Admin")]
+    [HttpPut("vehicles/{id:guid}"), Authorize(Policy = Perm.ManageVehicles)]
     public Task<IActionResult> EditVehicle(Guid id, VehicleInput input) => UpdateVehicle(id, input);
     private async Task<IActionResult> UpdateVehicle(Guid? id, VehicleInput input) => await Mutate(async () => {
         var plate = VietnamPlate.Normalize(input.Plate);
-        if (!VietnamPlate.CommonFormat(plate)) throw new InvalidOperationException("Use a common Vietnamese civilian plate. Special plates require a separately validated format rule.");
+        if (!(await db.PlateRules()).Valid(plate)) throw new InvalidOperationException("Plate does not match the site's plate formats. Special plates need a format rule in Lane settings.");
         if (await db.Vehicles.AnyAsync(x => x.NormalizedPlate == plate && x.Id != id)) throw new InvalidOperationException("Plate is already registered.");
         var vehicle = id.HasValue ? await db.Vehicles.FindAsync(id.Value) ?? throw new InvalidOperationException("Vehicle not found.") : new RegisteredVehicle();
         vehicle.Plate = input.Plate.Trim(); vehicle.NormalizedPlate = plate; vehicle.Owner = input.Owner.Trim(); vehicle.Kind = input.Kind;
         vehicle.PersonId = input.PersonId; vehicle.Active = input.Active; vehicle.Blocked = input.Blocked;
+        vehicle.Category = input.Category; vehicle.ValidUntilUtc = input.ValidUntilUtc?.UtcDateTime;
         if (!id.HasValue) db.Vehicles.Add(vehicle);
         if (input.AdditionalPersonIds is not null)
         {
@@ -108,63 +147,94 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
         }
         db.Log(Actor, "SaveVehicle", vehicle.Id); return vehicle;
     });
-    [HttpPost("visits"), Authorize(Roles = "Admin,Guard")]
+    [HttpPost("visits"), Authorize(Policy = Perm.ManageVisitors)]
     public async Task<IActionResult> Visit(VisitInput input) => await Mutate(async () => {
         if (input.From >= input.Until || input.Until <= DateTimeOffset.UtcNow) throw new InvalidOperationException("Visit window must end in the future and after its start.");
         var plate = VietnamPlate.Normalize(input.Plate);
-        if (!VietnamPlate.CommonFormat(plate)) throw new InvalidOperationException("Unsupported plate format.");
+        if (!(await db.PlateRules()).Valid(plate)) throw new InvalidOperationException("Plate does not match the site's plate formats.");
         var visit = new Visit { Name = input.Name.Trim(), Host = input.Host.Trim(), Plate = plate, FromUtc = input.From.UtcDateTime, UntilUtc = input.Until.UtcDateTime, MaxEntries = input.MaxEntries };
         db.Visits.Add(visit); db.Log(Actor, "CreateVisit", visit.Id); await Task.CompletedTask; return visit;
     });
-    [HttpPost("visits/{id:guid}/revoke"), Authorize(Roles = "Admin,Guard")]
+    // GC-16: a guard registers an unknown vehicle for today; the pass ends at the site's next day start.
+    [HttpPost("visits/walk-in"), Authorize(Policy = Perm.ManageVisitors)]
+    public async Task<IActionResult> WalkIn(WalkInInput input) => await Mutate(async () => {
+        var plate = VietnamPlate.Normalize(input.Plate);
+        if (!(await db.PlateRules()).Valid(plate)) throw new InvalidOperationException("Plate does not match the site's plate formats.");
+        var now = DateTime.UtcNow;
+        var visit = new Visit { Kind = "WalkIn", Name = input.Name.Trim(), Host = string.IsNullOrWhiteSpace(input.Host) ? Actor : input.Host.Trim(), Plate = plate,
+            FromUtc = now, UntilUtc = (await db.Site()).NextReset(now), MaxEntries = input.MaxEntries };
+        db.Visits.Add(visit); db.Log(Actor, "CreateWalkIn", visit.Id); return visit;
+    });
+    [HttpPost("visits/{id:guid}/revoke"), Authorize(Policy = Perm.ManageVisitors)]
     public async Task<IActionResult> Revoke(Guid id) => await Mutate(async () => {
         var visit = await db.Visits.FindAsync(id) ?? throw new InvalidOperationException("Visit not found.");
         visit.Revoked = true; db.Log(Actor, "RevokeVisit", id); return visit;
     });
-    [HttpPut("lanes"), Authorize(Roles = "Admin")]
+    [HttpPut("lanes"), Authorize(Policy = Perm.ManageSite)]
     public async Task<IActionResult> Lane(LaneInput input) => await Mutate(async () => {
         var lane = await db.Lanes.FindAsync(input.Id);
         if (lane is null) { lane = new Lane { Id = input.Id }; db.Lanes.Add(lane); }
         lane.Direction = input.Direction; lane.Policy = input.Policy; lane.PlateThreshold = input.PlateThreshold; lane.FaceThreshold = input.FaceThreshold;
         lane.ShadowMode = input.ShadowMode; lane.Simulation = input.Simulation; lane.AutoOpen = input.AutoOpen;
+        lane.DecisionValidSeconds = input.DecisionValidSeconds; lane.ReviewWindowSeconds = input.ReviewWindowSeconds; lane.CooldownSeconds = input.CooldownSeconds;
+        lane.HeartbeatFreshSeconds = input.HeartbeatFreshSeconds; lane.OfflineAlertSeconds = input.OfflineAlertSeconds;
+        if (PpeRules.Check(input.PpeRules) is string ppeError) throw new InvalidOperationException(ppeError);
+        if (input.Subject == "Person" && input.Policy is not ("FaceOnly" or "ManualReview")) throw new InvalidOperationException("A person lane decides by face: use the FaceOnly or ManualReview policy.");
+        lane.ExitRequiresEntry = input.ExitRequiresEntry; lane.RequireInspectionPhoto = input.RequireInspectionPhoto;
+        lane.Subject = input.Subject; lane.PpeRules = string.IsNullOrWhiteSpace(input.PpeRules) ? null : input.PpeRules.Trim(); lane.PpeMissingMode = input.PpeMissingMode;
+        if (input.LocationId.HasValue && !await db.Locations.AnyAsync(x => x.Id == input.LocationId)) throw new InvalidOperationException("Location not found.");
+        lane.LocationId = input.LocationId ?? lane.LocationId ?? (await AreaCatalog.EnsureDefault(db)).Id;
         db.Log(Actor, "ConfigureLane", input.Id); return lane;
     });
-    [HttpPost("simulate"), Authorize(Roles = "Admin,Guard")]
-    public async Task<IActionResult> Simulate(SimulatedObservation input) => await Execute(async () => await service.Observe(input.LaneId, input.CorrelationId,
-        new(input.Plate, input.PlateConfidence, input.PersonId, input.FaceConfidence, "simulation"), Actor, "Simulation"));
+    [HttpPost("simulate"), Authorize(Policy = Perm.OperateLane)]
+    public async Task<IActionResult> Simulate(SimulatedObservation input) => await Execute(async () => { await scope.Ensure(input.LaneId); return await service.Observe(input.LaneId, input.CorrelationId,
+        new(input.Plate, input.PlateConfidence, input.PersonId, input.FaceConfidence, "simulation"), Actor, "Simulation"); });
 
-    [HttpPost("recognize"), Authorize(Roles = "Admin,Guard"), RequestSizeLimit(11_000_000)]
+    [HttpPost("recognize"), Authorize(Policy = Perm.OperateLane), RequestSizeLimit(11_000_000)]
     public async Task<IActionResult> Recognize([FromForm, Required, StringLength(40)] string laneId,
         [FromForm, Required, StringLength(100)] string correlationId, IFormFile image, IFormFile? face) => await Execute(async () => {
+        await scope.Ensure(laneId);
         return await service.Capture(laneId, correlationId, image, face, Actor);
     });
-    [HttpPost("events/{id:guid}/review"), Authorize(Roles = "Admin,Guard")]
-    public async Task<IActionResult> Review(Guid id, ReviewInput input) => await Execute(async () => await service.Review(id, input.Approve, input.Note, Actor));
-    [HttpPost("events/{id:guid}/open"), Authorize(Roles = "Admin,Guard")]
-    public async Task<IActionResult> Open(Guid id) => await Execute(async () => await service.Open(id, Actor));
-    [HttpPost("alerts/{id:guid}/resolve"), Authorize(Roles = "Admin,Guard")]
-    public async Task<IActionResult> Resolve(Guid id) => await Mutate(async () => {
+    [HttpPost("events/{id:guid}/review"), Authorize(Policy = Perm.OperateLane)]
+    public async Task<IActionResult> Review(Guid id, ReviewInput input) => await Execute(async () => { await scope.EnsureEvent(id); return await service.Review(id, input.Approve, input.Note, Actor); });
+    [HttpPost("events/{id:guid}/open"), Authorize(Policy = Perm.OperateLane)]
+    public async Task<IActionResult> Open(Guid id) => await Execute(async () => { await scope.EnsureEvent(id); return await service.Open(id, Actor); });
+    [HttpPost("alerts/{id:guid}/acknowledge"), Authorize(Policy = Perm.HandleAlerts)]
+    public async Task<IActionResult> Acknowledge(Guid id) => await Mutate(async () => {
+        await scope.EnsureAlert(id);
         var alert = await db.Alerts.FindAsync(id) ?? throw new InvalidOperationException("Alert not found.");
-        alert.Resolved = true; alert.ResolvedBy = Actor; db.Log(Actor, "ResolveAlert", id); return alert;
+        AlertLifecycle.Acknowledge(alert, Actor, DateTime.UtcNow); db.Log(Actor, "AcknowledgeAlert", id); return alert;
     });
-    [HttpPost("commands/{id:guid}/reconcile"), Authorize(Roles = "Admin")]
+    [HttpPost("alerts/{id:guid}/resolve"), Authorize(Policy = Perm.HandleAlerts)]
+    public async Task<IActionResult> Resolve(Guid id, [FromBody] ResolveInput? input, [FromServices] IAuthorizationService authorization) => await Mutate(async () => {
+        await scope.EnsureAlert(id);
+        var alert = await db.Alerts.FindAsync(id) ?? throw new InvalidOperationException("Alert not found.");
+        var mayMarkFalse = (await authorization.AuthorizeAsync(User, Perm.MarkFalseAlarm)).Succeeded;
+        AlertLifecycle.Resolve(alert, Actor, DateTime.UtcNow, input?.Note, input?.FalseAlarm == true, mayMarkFalse);
+        db.Log(Actor, (alert.Status == "FalseAlarm" ? "FalseAlarm:" : "ResolveAlert:") + alert.ResolutionNote, id); return alert;
+    });
+    [HttpPost("commands/{id:guid}/reconcile"), Authorize(Policy = Perm.Reconcile)]
     public async Task<IActionResult> Reconcile(Guid id, ReviewInput input) => await Mutate(async () => {
+        await scope.EnsureCommand(id);
         var command = await db.Commands.FindAsync(id) ?? throw new InvalidOperationException("Command not found.");
         if (command.Status != "Unknown" && !(command.Status == "Acknowledged" && !command.PassageUtc.HasValue)) throw new InvalidOperationException("Only unknown outcomes or unconfirmed passages need reconciliation.");
         command.Status = "Reconciled"; db.Log(Actor, "ReconcileCommand:" + input.Note, id); return command;
     });
-    [HttpPost("commands/{id:guid}/simulate-passage"), Authorize(Roles = "Admin,Guard")]
+    [HttpPost("commands/{id:guid}/simulate-passage"), Authorize(Policy = Perm.OperateLane)]
     public async Task<IActionResult> SimulatePassage(Guid id) => await Mutate(async () => {
+        await scope.EnsureCommand(id);
         var command = await db.Commands.FindAsync(id) ?? throw new InvalidOperationException("Command not found.");
         var lane = await db.Lanes.FindAsync(command.LaneId) ?? throw new InvalidOperationException("Lane missing.");
         if (!lane.Simulation || command.Status != "Simulated") throw new InvalidOperationException("Only simulated commands support simulated passage.");
         await service.ConfirmPassage(command, lane); db.Log(Actor, "SimulatedPassage", command.Id); return command;
     });
-    [HttpGet("events/{id:guid}/evidence"), Authorize(Roles = "Admin,Guard")]
+    [HttpGet("events/{id:guid}/evidence"), Authorize(Policy = Perm.ViewEvidence)]
     public async Task<IActionResult> Evidence(Guid id)
     {
         var entry = await db.Events.FindAsync(id);
         if (entry?.EvidenceId is null) return NotFound();
+        if (!await scope.Allows(entry.LaneId)) return StatusCode(403, new { message = new AreaForbiddenException().Message });
         var path = Path.Combine(EvidenceStorage.Directory(environment, config), Path.GetFileName(entry.EvidenceId));
         if (!System.IO.File.Exists(path)) return NotFound();
         db.Log(Actor, "ViewEvidence", id); await db.SaveChangesAsync();
@@ -180,6 +250,7 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
     private async Task<IActionResult> Execute(Func<Task<object>> action)
     {
         try { return Ok(await action()); }
+        catch (AreaForbiddenException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (HttpRequestException) { return StatusCode(503, new { message = "Recognition service is unavailable. Use guard review or restore the AI service." }); }
         catch (TaskCanceledException) { return StatusCode(504, new { message = "Recognition service timed out." }); }

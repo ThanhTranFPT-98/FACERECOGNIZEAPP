@@ -84,6 +84,7 @@ The project started as a face-recognition attendance app (employees/strangers). 
 ### Planned, not built
 
 - Receiver for third-party plate cameras (format in the `../tcp` capture). See `docs/THIRD_PARTY_CAMERA_PLAN.md`.
+- 
 
 ## 2A. General constraints (multi-project)
 
@@ -101,76 +102,92 @@ Source: generalised from *Thuyết Minh Hệ Thống Than Uông Bí V2 17.9.26.d
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-01 | **Multi-site, multi-system on one platform.** Hierarchy *Area → Location → Lane/Camera*. Every screen, alert and report can be filtered by area. | ❌ | Lanes are a flat list; no Area/Location entity |
-| GC-02 | **Two tiers: site station + central platform.** Each gate/lot runs locally; results sync to the central server (two-way). | ❌ | Single API process, one DB |
-| GC-03 | **Keep working offline.** If the link to the centre drops, the site keeps operating in a configured local mode, buffers events and evidence, and syncs later **without losing data**. | 🟡 | CR-001: outbox + local video buffer + uploader to cloud. Two-way sync with a central platform not built |
-| GC-04 | **Guard stations at the same gate sync peer-to-peer.** One PC failing must not stop the others. | ⚠️ | Current design is "one API process per site" with an in-process lock (section 17). Needs an architecture decision |
-| GC-05 | **Vendor-neutral input.** Edge devices send one common message format, whatever the camera brand. Each brand gets an adapter. Existing RTSP/ONVIF cameras are reused. | 🟡 | Own OCR + lane worker only. Vendor adapter planned in `THIRD_PARTY_CAMERA_PLAN.md` |
-| GC-06 | **Reuse the customer's existing devices and data**, e.g. face terminals that already hold enrolled workers, and existing barriers. Integrate their *outputs*; don't replace them. | ❌ | Face recognition is our own ArcFace service; no adapter for external face terminals |
-| GC-07 | **Open integration API** for HR, access-control and production systems (push/pull events, people, vehicles). | 🟡 | REST exists, but only for our own UI; no documented external API or keys |
-| GC-08 | **Scale without rewrite or downtime.** Add a camera, AI box, lane, area or user from the UI while the system is running. | 🟡 | Lanes and users can be added via UI; cameras, AI boxes and areas can't |
-| GC-09 | **AI processing at the edge; only results go to the centre** (bandwidth). Video stream and event data travel on separate channels. | 🟡 | Our OCR is central; there's no concept of an edge box |
+| GC-01 | **Multi-site, multi-system on one platform.** Hierarchy *Area → Location → Lane/Camera*. Every screen, alert and report can be filtered by area. | ✅ | CR-002 areas/locations; CR-005 accounts limited by area; CR-012 search, stats and Excel filter by area | 
+Note for contraint: We need to design Area, location field in the DB 
+| GC-02 | **Two tiers: site station + central platform.** Each gate/lot runs locally; results sync to the central server (two-way). | 🟡 | Decision 2026-09-25: one station PC = one API + DB (kept on purpose, Plan V2 §3.1). Results go to the cloud (CR-001) and presence between stations is synced (CR-010). The central platform is deferred by the customer |
+Note for contraint: I need you to explain clearly for me, i can not understand how single API process, one DB affect to our system
 
+| GC-03 | **Keep working offline.** If the link to the centre drops, the site keeps operating in a configured local mode, buffers events and evidence, and syncs later **without losing data**. | 🟡 | CR-001: outbox + local video buffer + uploader to cloud. Two-way sync with a central platform not built |
+| GC-04 | **Guard stations at the same gate sync peer-to-peer.** One PC failing must not stop the others. | ✅ (decided) | Decision 2026-09-25: one PC per guard station, so no peer sync for decisions. Presence between stations is synced (CR-010, option E) |
+Note for contraint: Please explain clearly. There are only one computer in each guard station 
+| GC-05 | **Vendor-neutral input.** Edge devices send one common message format, whatever the camera brand. Each brand gets an adapter. Existing RTSP/ONVIF cameras are reused. | ✅ | CR-007: receiver + inbox + adapters (`t1550`, `generic`) → one observation format. Not yet tried on a real camera |
+| GC-06 | **Reuse the customer's existing devices and data**, e.g. face terminals that already hold enrolled workers, and existing barriers. Integrate their *outputs*; don't replace them. | 🟡 | CR-008: face terminals via the `generic` adapter (terminal PIN = PersonId). ZKTeco-specific protocol unknown (Q3) |
+Note for contraint: We try to use ArcFace for demo at the moment
+| GC-07 | **Open integration API** for HR, access-control and production systems (push/pull events, people, vehicles). | 🟡 | REST exists, but only for our own UI; no documented external API or keys |
+| GC-08 | **Scale without rewrite or downtime.** Add a camera, AI box, lane, area or user from the UI while the system is running. | ✅ | Lanes, users, cameras (incl. AI devices), areas, locations, shifts, roles: all from the UI while running. AI boxes are not managed by this app (decision 2026-09-25) |
+Note for contraint: there will be no AI box in this application. It is just a management application taking data from cameras but AI application
+| GC-09 | **AI processing at the edge; only results go to the centre** (bandwidth). Video stream and event data travel on separate channels. | ✅ (decided) | Not our scope (decision 2026-09-25): the platform's AI cameras/boxes do the AI at the edge; we receive only results (CR-007). Video stays on its own path (recorder, wall) |
+Note for contraint: Of course, but the processing of the AI was not a part that the application need to care. This application will be a part of the platform, and the platform will manage AI Box. 
 ### Access workflow
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-10 | **Subjects: people and vehicles.** A lane may control people (turnstile/flap gate), vehicles (barrier) or person + vehicle. | 🟡 | Vehicle lanes only; face is used only as vehicle evidence |
+| GC-10 | **Subjects: people and vehicles.** A lane may control people (turnstile/flap gate), vehicles (barrier) or person + vehicle. | ✅ | CR-008: `Lane.Subject` Vehicle/Person, access list for people; person + vehicle = `Both` policy on a vehicle lane |
 | GC-11 | **Entry:** identify → check permission → auto-open **or** guard confirms → save event + images → open → sensor confirms passage → the controller closes. | ✅ | Matches the 8.1 flow. The overview image at the moment of passing isn't captured separately |
-| GC-12 | **Exit is matched to the open entry session.** Show entry and exit images side by side. Mismatch, duplicate plate or missing data ⇒ opening is blocked and it goes to the guard. | 🟡 | Sessions match by plate; exit-without-entry only raises an alert (doesn't block); no side-by-side images |
-| GC-13 | **Person–vehicle pairing** (configurable): the face and the plate must match the registered pair at entry **and** exit. | 🟡 | `Both` policy + shared drivers exist; exit isn't checked against the person who entered |
+| GC-12 | **Exit is matched to the open entry session.** Show entry and exit images side by side. Mismatch, duplicate plate or missing data ⇒ opening is blocked and it goes to the guard. | ✅ | CR-009: lane option `ExitRequiresEntry` → guard; entry/exit images side by side |
+| GC-13 | **Person–vehicle pairing** (configurable): the face and the plate must match the registered pair at entry **and** exit. | ✅ | `Both` policy at entry; CR-009: exit person must equal the entry person |
 | GC-14 | **Every exception** (unreadable, no permission, unregistered, mismatch, duplicate, missing data) blocks automatic opening. The guard decides and the **reason + actor are logged**. | ✅ | Review flow with mandatory note + audit |
-| GC-15 | **Vehicle categories with different rules:** registered, guest/visitor, delivery, unregistered. Permission has a **validity period**. | 🟡 | Registered + visitor only; vehicles have no category or expiry |
-| GC-16 | **Walk-in registration at the gate:** a guard quickly registers an unknown vehicle for the day; it **expires automatically at the start of the next day** (configurable). | 🟡 | Visitor pass exists but needs a start/end time; no "today only" quick flow |
-| GC-17 | **Optional inspection step on exit** (e.g. truck cargo check) with its own camera image, recorded **before** opening. Configurable per lane/category. | ❌ | Not supported |
-| GC-18 | **Occupancy counting** (people underground, vehicles in lot) per shift. Counts are only valid when both directions are recorded, so missing passages must be surfaced. | 🟡 | Sessions exist; no occupancy view, no shift concept |
-| GC-19 | **Overstay alert:** subject still inside after a configurable duration (e.g. one shift). | ❌ | Not supported |
-| GC-20 | **Shifts:** configurable work shifts; search, stats and reports by shift. | ❌ | Not supported |
+| GC-15 | **Vehicle categories with different rules:** registered, guest/visitor, delivery, unregistered. Permission has a **validity period**. | ✅ | CR-009: category + valid-until; review categories configurable |
+| GC-16 | **Walk-in registration at the gate:** a guard quickly registers an unknown vehicle for the day; it **expires automatically at the start of the next day** (configurable). | ✅ | CR-009: walk-in form, ends at the site's reset hour |
+| GC-17 | **Optional inspection step on exit** (e.g. truck cargo check) with its own camera image, recorded **before** opening. Configurable per lane/category. | ✅ | CR-009: guard photo (upload / lane camera), lane option requires it before opening. Per-category: not built |
+Note for contraint: can we design the guard take the photo when they want
+| GC-18 | **Occupancy counting** (people underground, vehicles in lot) per shift. Counts are only valid when both directions are recorded, so missing passages must be surfaced. | ✅ | CR-010: *Inside now* per area with names (face ID), shift, unmatched exits, double entries |
+Note for contraint: and of course we will coperate it with faceID to know exactly who is missing
+| GC-19 | **Overstay alert:** subject still inside after a configurable duration (e.g. one shift). | ✅ | CR-010: `Area.OverstayMinutes` → alert |
+| GC-20 | **Shifts:** configurable work shifts; search, stats and reports by shift. | ✅ | CR-010 shifts; CR-012 shift on events, search/stats/Excel by shift |
 | GC-21 | **Physical safety stays in hardware.** The software never skips obstacle/loop checks and never sends a blind close. | ✅ | By design (`BARRIER_BRIDGE.md`) |
 
 ### Performance
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-22 | **Decision latency target per lane type:** the time from the subject reaching the camera to the open command. It's configurable and measured. Reference values: person 2–3 s, motorbike 3–5 s, car 4–6 s. | ❌ unmeasured | Burst capture (≤2 s) + Tesseract per frame (≤20 s timeout). Likely too slow. No latency metrics recorded |
-| GC-23 | **Peak throughput:** the reference site has ~100 vehicles / 15 min across 2 lanes and ~2,000 registered vehicles. Must not cause queues. | ❌ unmeasured | A global lock serialises all decisions; no load test |
-| GC-24 | **Temporal confirmation:** an object must be detected repeatedly before an alert is raised. Duplicates within a short window are merged. | 🟡 | 2-frame burst consensus; alert dedup only for some reasons |
-
+| GC-22 | **Decision latency target per lane type:** the time from the subject reaching the camera to the open command. It's configurable and measured. Reference values: person 2–3 s, motorbike 3–5 s, car 4–6 s. | 🟡 | Decision (user): we measure from our receipt of the AI result. CR-007 records t1..t4; CR-013 measured P95 t1→t3 = 0.35 s locally. Camera-side time: vendor's part | 
+Note for Performance: Actually the application will be integrated with cameras AI of third sides. So that, We just receive their output. I think we can care when we have an output send to the system
+| GC-23 | **Peak throughput:** the reference site has ~100 vehicles / 15 min across 2 lanes and ~2,000 registered vehicles. Must not cause queues. | 🟡 | CR-013: lock released during controller I/O + auto-open queue; load test passes at 3.6× the peak locally. Station-PC run pending |
+Note for Performance: i do not know exactly what do u mean 
+| GC-24 | **Temporal confirmation:** an object must be detected repeatedly before an alert is raised. Duplicates within a short window are merged. | 🟡 | CR-007: merge window for camera results (default 10 s). Confirm-count for detection alerts: see PPE (CR-008) |
+Note for performance: give me an example then i will decide later 
 ### Alerts and monitoring
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-25 | **Alert lifecycle:** *Open → Acknowledged* (who/when) *→ Resolved* (**note mandatory**) or *False alarm*. False-alarm rate feeds AI tuning. | 🟡 | Only `Resolved` true/false, no note, no false-alarm state |
-| GC-26 | **Every alert** has an ID, type, severity, time, area/lane, image **and video clip** evidence (with the detected box drawn). The UI shows it immediately with **colour by severity and sound**. | 🟡 | CR-001: events link to 24/7 video ±10 s. No drawn boxes, no sound |
-| GC-27 | **Device health** for every camera, edge box, controller: periodic heartbeat; offline after a configurable timeout ⇒ alert. | 🟡 | Lane heartbeat only (30 s) |
+| GC-25 | **Alert lifecycle:** *Open → Acknowledged* (who/when) *→ Resolved* (**note mandatory**) or *False alarm*. False-alarm rate feeds AI tuning. | ✅ | CR-011. False-alarm rate: in the Excel report (Phase 6) |
+| GC-26 | **Every alert** has an ID, type, severity, time, area/lane, image **and video clip** evidence (with the detected box drawn). The UI shows it immediately with **colour by severity and sound**. | 🟡 | CR-011: colour, sound, lane/area. Drawn boxes: AI cameras send no coordinates |
+| GC-27 | **Device health** for every camera, controller: periodic heartbeat; offline after a configurable timeout ⇒ alert. | ✅ | Lane controllers (heartbeat), recorders (segments), AI devices (CR-011 silent alert) |
 | GC-28 | **Alert types are extensible** per site (unregistered vehicle, mismatch, overstay, intrusion zone, cargo, …). Per-camera sensitivity and confirmation time. | 🟡 | Reasons are free strings in code; no per-camera config |
-| GC-29 | **Live video wall** (grid of RTSP streams, grouped by area) and camera status. | ❌ | Not supported (legacy Monitor uses the browser webcam only) |
-
+| GC-29 | **Live video wall** (grid of RTSP streams, grouped by area) and camera status. | 🟡 | CR-011: wall grouped by area via MediaMTX gateway + generated config. Not tried with real streams |
+Note for Alerts and monitoring: Design live video wall for Rtsp streams grouped by area 
 ### Data, evidence and reporting
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-30 | **Store images at every pass:** plate crop, overview, and optional inspection image. Keep them viewable and downloadable. | 🟡 | One evidence image per event |
-| GC-31 | **Evidence integrity:** SHA-256 hash stored at capture, shown in reports. | 🟡 | Video segments hashed (stored + uploaded as metadata). Photos not yet; no report |
-| GC-32 | **Configurable retention** with automatic clean-up. | ✅ | `EvidenceRetentionDays` + worker |
-| GC-33 | **Multi-criteria search:** time range / shift / day, area, lane/camera, event type, severity, status, plate/person. | 🟡 | Plate + time + page only |
-| GC-34 | **Excel export** using the current filter. Reference layout has 5 sheets: Overview (who exported, filters, totals, false-alarm rate), Events, By area, Processing performance (mean/median/P95 of transfer time, time to acknowledge, time to close), Evidence (ID, size, SHA-256, retention). | ❌ | Not supported |
-| GC-35 | **Statistics** by day / month / year / shift / area. | ❌ | Not supported for parking (legacy dashboard is face-only) |
+| GC-30 | **Store images at every pass:** plate crop, overview, and optional inspection image. Keep them viewable and downloadable. | ✅ | Plate crop (evidence) + overview + inspection (`EvidenceImage`) |
 
+| GC-31 | **Evidence integrity:** SHA-256 hash stored at capture, shown in reports. | ✅ | Video segments, `EvidenceImage` and the main evidence (`AccessEvent.EvidenceSha256`, CR-010) hashed at capture; shown in the Excel Evidence sheet (CR-012) |
+| GC-32 | **Configurable retention** with automatic clean-up. | ✅ | `EvidenceRetentionDays` + worker |
+| GC-33 | **Multi-criteria search:** time range / shift / day, area, lane/camera, event type, severity, status, plate/person. | ✅ | CR-012 `search` (alert severity/status: in the Alerts tab and the Excel) |
+| GC-34 | **Excel export** using the current filter. Reference layout has 5 sheets: Overview (who exported, filters, totals, false-alarm rate), Events, By area, Processing performance (mean/median/P95 of transfer time, time to acknowledge, time to close), Evidence (ID, size, SHA-256, retention). | ✅ | CR-012 |
+Note for Data, evidence and reporting: Design it 
+| GC-35 | **Statistics** by day / month / year / shift / area. | ✅ | CR-012: day/month/year/hour/shift/lane, filterable by area. Q4 (parking by hour or driver's shift) still to confirm |
+Note for Data, evidence and reporting: Support all month / year / shift / area but for parking it will be different because shift for the workers who go to the undermine
 ### Users, security and deployment
 
 | ID | Constraint | Status | Current state / gap |
 | --- | --- | --- | --- |
-| GC-36 | **Configurable roles.** Reference set: Viewer, Operator (guard), Safety officer (mark false alarms), Technician (cameras/areas/AI config), System admin. | 🟡 | Fixed Admin / Guard / Auditor |
-| GC-37 | **Permissions are scoped by area** and accounts have an **expiry date**. | ❌ | Global roles, no expiry |
+| GC-36 | **Configurable roles.** Reference set: Viewer, Operator (guard), Safety officer (mark false alarms), Technician (cameras/areas/AI config), System admin. | ✅ | CR-004: permission-based; 7 built-in roles + custom roles. "Mark false alarm" permission comes with the alert lifecycle (GC-25) |
+| GC-37 | **Permissions are scoped by area** and accounts have an **expiry date**. | ✅ | CR-004 expiry (login + open sessions); CR-005 area-limited accounts |
+We need to design roles
 | GC-38 | **Audit** of login, configuration changes, alert handling, permission changes. | ✅ | `AuditEntry` (section 12) |
-| GC-39 | **Browser-based, no install on the station; UI language configurable** (Vietnamese required for the reference site). | 🟡 | Browser ✅; UI is **English only** |
-| GC-40 | **Remote access for managers over the Internet** behind a firewall with network segmentation, over HTTPS. | 🟡 | HTTPS/proxy guidance exists (`DEPLOYMENT.md`); not deployed |
-| GC-41 | **Runs on modest hardware.** Reference station PC: Core i3/i5 12th gen, **8 GB RAM**, 256 GB SSD + 1 TB HDD, **Windows 11 Home**, no GPU. Heavy AI runs on a separate edge AI box. Central server: 12-core Xeon, 32 GB, large RAID. | ❓ | Not verified. PyTorch face service likely too heavy for the station PC |
-| GC-42 | **Barrier control through a network I/O relay controller** (8 in / 8 out, web interface) plus loop detectors, i.e. the bridge in `BARRIER_BRIDGE.md` must support this class of device. | 🟡 | Generic HTTP bridge contract only; no relay adapter |
-| GC-43 | Plate format rules per country/region are **configurable** (currently hard-coded Vietnamese regex in C# and Python). | 🟡 | Works for VN only |
-| GC-44 | Timings are **configurable per site/lane**: decision validity 30 s, review window 5 min, lane cooldown 8 s, heartbeat 10/30 s. | ❌ | Hard-coded (section 13) |
 
+| GC-39 | **Browser-based, no install on the station; UI language configurable** (Vietnamese required for the reference site). | ✅ | CR-014: Vietnamese default + English switch, Excel in Vietnamese. Legacy face pages still English |
+Vietnamese required in all sile including UI
+| GC-40 | **Remote access for managers over the Internet** behind a firewall with network segmentation, over HTTPS. | 🟡 | HTTPS/proxy guidance exists (`DEPLOYMENT.md`); not deployed |
+| GC-41 | **Runs on modest hardware.** Reference station PC: Core i3/i5 12th gen, **8 GB RAM**, 256 GB SSD + 1 TB HDD, **Windows 11 Home**, no GPU. Heavy AI runs on a separate edge AI box. Central server: 12-core Xeon, 32 GB, large RAID. | 🟡 | No AI runs on the station any more (decision 2026-09-25; ArcFace is demo only). Load test to run on the real i3/8 GB PC (runbook step 9) |
+Note for Users, Security and deployment: We does need to manage AI Box in this application 
+| GC-42 | **Barrier control through a network I/O relay controller** (8 in / 8 out, web interface) plus loop detectors, i.e. the bridge in `BARRIER_BRIDGE.md` must support this class of device. | 🟡 | Generic HTTP bridge contract only; no relay adapter |
+| GC-43 | Plate format rules per country/region are **configurable** (currently hard-coded Vietnamese regex in C# and Python). | ✅ | CR-006: site regex list (empty = VN built-in). Demo OCR (Python) still VN-only |
+| GC-44 | Timings are **configurable per site/lane**: decision validity 30 s, review window 5 min, lane cooldown 8 s, heartbeat 10/30 s. | ✅ | CR-003: site defaults (`SiteSettings`) + per-lane overrides, edited in *Lane settings*, bounded |
+Note for Users, Security and deployment: give me an example 
 ### What this means for the design (for discussion — not decided)
 
 - The biggest gaps are **structural**: GC-01 areas, GC-02/03/04 edge + central + sync, GC-06 external device adapters. They should be decided **before** adding features, because they change the data model and deployment.
@@ -200,12 +217,22 @@ Still unknown for this site: exact camera brand/firmware and message format (com
 
 ## 3. Users and roles
 
-| Role | Can do |
+Since CR-004, endpoints check a **permission**, and roles are rows in the database (`Role`, `RolePermission`) that an Admin can change in *Operators & roles*. Built-in roles (seeded when missing; an admin's later edits are kept):
+
+| Role | Permissions |
 | --- | --- |
-| **Admin** | Everything: vehicles, lanes, operators, reconcile commands, legacy face pages, audit |
-| **Guard** | Lane monitor, simulate/capture, review, request open, visitors, acknowledge alerts, history |
-| **Auditor** | Read-only: snapshot, history, audit |
-| **Device** (machine) | Lane worker / barrier bridge: capture, capture-burst, heartbeat, face templates — via `X-Device-Key` |
+| **Admin** | All (fixed; can't be edited). Also the only role for the legacy face pages, editing roles and granting Admin |
+| **Guard** | ViewLive, ViewEvidence, OperateLane, ManageVisitors, HandleAlerts (same rights as before CR-004) |
+| **Auditor** | ViewLive, ViewAudit (same rights as before CR-004) |
+| **Viewer** | ViewLive |
+| **SafetyOfficer** | ViewLive, ViewEvidence, HandleAlerts, ViewAudit |
+| **Manager** | ViewLive, ViewEvidence, ManageVisitors, ManageVehicles, ViewAudit |
+| **Technician** | ViewLive, ManageSite |
+| **Device** (machine) | Lane worker / barrier bridge: capture, capture-burst, heartbeat, face templates — via `X-Device-Key`. Never gets user permissions |
+
+Permission → what it opens: **ViewLive** snapshot, history, areas, timings, health · **ViewEvidence** evidence photos, cameras list, video · **OperateLane** simulate, recognize, review, request open, simulated passage · **ManageVisitors** visitor passes · **HandleAlerts** acknowledge alerts · **ManageVehicles** vehicles · **ManageSite** lanes, areas, locations, cameras, timings · **ManageUsers** operator accounts · **ViewAudit** audit log · **Reconcile** reconcile unknown commands.
+
+Accounts may have an **expiry date** (`ParkingUser.ExpiresUtc`) and may be **limited to areas** (`UserArea`, CR-005). No areas = all areas. A limited account only sees and acts on lanes in its areas (403 otherwise). It can't use `ManageSite`/`ManageUsers`. Admin accounts can't be limited.
 
 ## 4. Glossary
 
@@ -330,6 +357,8 @@ AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane
 | F20 | 24/7 recording to local disk (ring buffer) | `VideoRecorderSupervisor` |
 | F21 | Upload of records, photos and video to S3-compatible cloud (outbox, retry, bandwidth cap) | `CloudUploader` |
 | F22 | Event video playback ±10 s | `events/{id}/video`, `video/segments/{id}/play` / *Video* button |
+| F23 | Areas and locations (Area → Location → Lane), area filter | `areas`, `locations`, `events?areaId` / *Areas*, *Lane settings*, *Lane monitor* |
+| F24 | Site timing defaults + per-lane overrides | `settings/timings`, `lanes` / *Lane settings* |
 
 ## 8. Main workflows
 
@@ -409,7 +438,10 @@ erDiagram
     RegisteredVehicle { guid Id string Plate string NormalizedPlate UK string Kind string Owner int PersonId bool Active bool Blocked }
     VehiclePerson { guid VehicleId PK int PersonId PK }
     Visit { guid Id string Name string Host string Plate datetime FromUtc datetime UntilUtc int MaxEntries int Entries bool Revoked }
-    Lane { string Id PK string Direction string Policy double PlateThreshold double FaceThreshold bool ShadowMode bool Simulation bool AutoOpen datetime LastHeartbeatUtc bool SafetyHealthy bool VehiclePresent bool Obstructed string BarrierState }
+    Area { guid Id string Code UK string Name string Kind }
+    Location { guid Id guid AreaId FK string Name }
+    SiteSettings { int Id PK int DecisionValidSeconds int ReviewWindowSeconds int CooldownSeconds int HeartbeatFreshSeconds int OfflineAlertSeconds }
+    Lane { string Id PK guid LocationId FK string Direction string Policy double PlateThreshold double FaceThreshold bool ShadowMode bool Simulation bool AutoOpen datetime LastHeartbeatUtc bool SafetyHealthy bool VehiclePresent bool Obstructed string BarrierState }
     AccessEvent { guid Id string CorrelationId UK string LaneId string Plate double PlateConfidence int PersonId double FaceConfidence string ModelVersion string Outcome string Reason string Source guid VisitId string EvidenceId datetime ExpiresUtc string ReviewBy }
     DeviceCommand { guid Id guid EventId UK string LaneId string Status datetime CreatedUtc datetime PassageUtc }
     ParkingSession { guid Id string Plate guid EntryCommandId UK guid ExitCommandId datetime EntryUtc datetime ExitUtc }
@@ -417,6 +449,8 @@ erDiagram
     AuditEntry { long Id datetime CreatedUtc string Actor string Action string Target }
 
     RegisteredVehicle ||--o{ VehiclePerson : "shared drivers"
+    Area ||--o{ Location : contains
+    Location ||--o{ Lane : contains
     Lane ||--o{ AccessEvent : "observed on"
     AccessEvent ||--o| DeviceCommand : "at most one"
     AccessEvent }o--o| Visit : "uses"
@@ -426,7 +460,7 @@ erDiagram
 
 Notes:
 
-- Relations shown in the diagram are **logical**. Only `VehiclePerson → RegisteredVehicle` is a real foreign key. The others are matched by ID or by plate string in code.
+- Relations shown in the diagram are **logical**. Only `VehiclePerson → RegisteredVehicle`, `Location → Area` and `Lane → Location` (both `Restrict`) are real foreign keys. The others are matched by ID or by plate string in code.
 - `PersonId` refers to `People.Id` in the **face** database (another DB, so there is no FK).
 - Unique indexes enforce idempotency: `CorrelationId`, `DeviceCommand.EventId`, `ParkingSession.EntryCommandId`.
 - Face DB (legacy, SQL Server): `People` (base) → `Employee`, `Stranger`; `Embedding` (vector, encrypted with Data Protection when written); `AccessLog`.
@@ -472,9 +506,16 @@ Base URL: `http://localhost:5085`. Every non-GET `/api` call needs the `X-CSRF-T
 | GET | `/api/auth/csrf` | anonymous |
 | POST | `/api/auth/login` · `/api/auth/logout` | anonymous · any |
 | GET | `/api/auth/me` | any |
-| GET/POST | `/api/auth/users`, POST `/api/auth/users/{id}/deactivate` | Admin |
+| GET/POST | `/api/auth/users`, PUT `/api/auth/users/{id}` (role, expiry, active), POST `/api/auth/users/{id}/deactivate` | ManageUsers (granting Admin: Admin only) |
+| GET · PUT/DELETE | `/api/auth/roles`, `/api/auth/roles/{id}` | ManageUsers · Admin only |
 | GET | `/api/v1/parking/snapshot` | Admin, Guard, Auditor |
-| GET | `/api/v1/parking/events?plate&from&until&page` | Admin, Guard, Auditor |
+| GET | `/api/v1/parking/events?plate&from&until&areaId&page` | Admin, Guard, Auditor |
+| GET | `/api/v1/parking/areas` (areas → locations → lane IDs) | Admin, Guard, Auditor |
+| PUT/DELETE | `/api/v1/parking/areas`, `/areas/{id}`, `/locations`, `/locations/{id}` | Admin |
+| GET · PUT | `/api/v1/parking/settings/timings` | Admin, Guard, Auditor · Admin |
+| GET · POST | `/api/v1/parking/presence` · `/presence/close` | ViewLive · HandleAlerts |
+| GET · PUT/DELETE | `/api/v1/parking/shifts` · `/shifts/{id}` | ViewLive · ManageSite |
+| POST | `/api/v1/parking/sync/presence` | `X-Sync-Key` (other stations) |
 | GET | `/api/v1/parking/audit?page` | Admin, Auditor |
 | GET | `/api/v1/parking/health` | Admin, Guard, Auditor |
 | POST/PUT | `/api/v1/parking/vehicles`, `/vehicles/{id}` | Admin |
@@ -484,7 +525,9 @@ Base URL: `http://localhost:5085`. Every non-GET `/api` call needs the `X-CSRF-T
 | POST | `/api/v1/parking/recognize` (multipart: laneId, correlationId, image, face?) | Admin, Guard |
 | POST | `/api/v1/parking/events/{id}/review` · `/events/{id}/open` | Admin, Guard |
 | GET | `/api/v1/parking/events/{id}/evidence` | Admin, Guard |
-| POST | `/api/v1/parking/alerts/{id}/resolve` | Admin, Guard |
+| POST | `/api/v1/parking/alerts/{id}/acknowledge` · `/alerts/{id}/resolve` `{note, falseAlarm}` | HandleAlerts (false alarm: MarkFalseAlarm) |
+| GET | `/api/v1/parking/video/wall` · `/video/gateway-config` | ViewEvidence · Admin only |
+| GET | `/api/v1/parking/search` · `/stats?groupBy=` · `/export` (xlsx) | ViewLive · ViewReports · ViewReports |
 | POST | `/api/v1/parking/commands/{id}/reconcile` | Admin |
 | POST | `/api/v1/parking/commands/{id}/simulate-passage` | Admin, Guard |
 | GET | `/api/v1/parking/cameras` | Admin, Guard |
@@ -492,6 +535,7 @@ Base URL: `http://localhost:5085`. Every non-GET `/api` call needs the `X-CSRF-T
 | GET | `/api/v1/parking/events/{id}/video` | Admin, Guard |
 | GET | `/api/v1/parking/video/segments/{id}/play` (MP4 stream, or redirect to signed cloud URL) | Admin, Guard |
 | POST | `/api/v1/parking/device/capture`, `/capture-burst`, `/heartbeat` | Device key |
+| POST | `/api/v1/parking/receiver/{adapter}?key=…` · `/api` on `Receiver:Port` | Receiver key · IP allow-list |
 | GET | `/api/v1/parking/device/face-templates` | Device key |
 | — | `/api/Employee`, `/api/Stranger`, `/api/AccessLog`, `/api/Alerts`, `/api/Dashboard`, `/api/embeddings`, `/api/FaceRecognize` | Admin (legacy) |
 | WS | `/parkingHub` (event `ParkingChanged`) · `/notificationHub` | staff · Admin |
@@ -500,7 +544,8 @@ Error convention in `ParkingController`: business rule broken → **409** `{mess
 
 ## 12. Security
 
-- Cookie `parking-session`: HttpOnly, SameSite=Strict, 8 h lifetime. The cookie is re-validated against the DB on every request, so a deactivated user is signed out immediately.
+- Cookie `parking-session`: HttpOnly, SameSite=Strict, 8 h lifetime. The cookie is re-validated against the DB on every request, so a deactivated, expired or re-roled user is signed out immediately.
+- Authorization is by permission (`[Authorize(Policy = Perm.X)]`, `PermissionHandler` reads the role's permissions from the DB). Escalation guards: only Admin edits roles or grants Admin; nobody changes their own account; the last active Admin can't be removed or expired.
 - Passwords hashed with ASP.NET `PasswordHasher`; minimum length 12; no default password (bootstrap via `Parking__BootstrapPassword`).
 - CSRF middleware on all mutating `/api` calls (except device routes).
 - Fallback policy: every endpoint requires authentication unless `[AllowAnonymous]`.
@@ -534,8 +579,13 @@ Set these through environment variables (`__` = section separator) or user-secre
 | `Cloud__Enabled`, `Cloud__Provider` | off, `S3` | Outbox + uploader; `Folder` for tests |
 | `Cloud__Endpoint`, `Cloud__Region`, `Cloud__Bucket`, `Cloud__AccessKey`, `Cloud__SecretKey` | — | S3-compatible storage (keys via secret store) |
 | `Cloud__SiteId`, `Cloud__UploadMbpsCap`, `Cloud__BacklogAlertMinutes` | `site`, 0 (no cap), 60 | Key prefix per site, bandwidth cap, backlog alert |
+| `Receiver__Key` | — | AI camera receiver key (≥ 32 chars), used as `?key=` |
+| `Parking__StationId` | machine name | This station's name in presence records |
+| `Video__GatewayUrl` | — | Stream gateway (MediaMTX WebRTC) base URL for the video wall |
+| `Sync__Key`, `Sync__Peers`, `Sync__CloudPeers` | —, —, — | Shared key (≥ 32 chars); LAN URLs of the other stations; cloud site IDs of the other stations |
+| `Receiver__Port`, `Receiver__PortAdapter`, `Receiver__AllowedIps` | off, `t1550`, — | Fixed-path cameras: `POST /api` on this port only, from these IPs/CIDRs (add the port to `--urls`) |
 
-Timing constants (hard-coded, `ParkingService.cs` / `Maintenance.cs`): decision valid 30 s · review window 5 min · lane cooldown 8 s · heartbeat freshness 10 s · offline alert 30 s · maintenance tick 15 s · AI timeout 20 s · device HTTP timeout 5 s.
+Site timings (CR-003, stored in the database, not in config): decision valid 30 s · review window 5 min · lane cooldown 8 s · heartbeat freshness 10 s · offline alert 30 s. These are the defaults; change them in *Lane settings* → *Site timing defaults*, or per lane. Still hard-coded (infrastructure): maintenance tick 15 s · AI timeout 20 s · device HTTP timeout 5 s.
 
 ## 14. Run, test and troubleshoot
 
@@ -560,6 +610,9 @@ python tests/integration_parking.py          # needs Debug build of API
 $env:PARKING_FFMPEG='C:\tools\ffmpeg.exe'; python tests/integration_video.py   # CR-001 end-to-end (real ffmpeg, folder "cloud")
 python -m unittest discover -s AiService -p test_plate_service.py -v
 python -m unittest discover -s tests -p test_backup.py -v
+python tests/load_test.py --vehicles 40 --lane-gap 5 --bridge-delay 2   # GC-23 load check (Debug build, ~4 min)
+node tests/ui_smoke.mjs                      # UI render check for 4 roles, Vietnamese default (needs ui/node_modules)
+python tests/i18n_check.py                   # every UI text has a Vietnamese entry
 ```
 
 ### Environment on this machine (checked 2026-09-24)
@@ -583,9 +636,9 @@ python -m unittest discover -s tests -p test_backup.py -v
 | Recognize → 503 | OCR service down or Tesseract missing (`/health` returns 503) |
 | Every camera event is ManualReview | `ApprovedPlateModel` empty (by design) |
 | Open → 409 "Shadow mode…" | Lane shadow mode ON |
-| Open → 409 "recent or unresolved command" | Command on lane is Unknown/Pending/Acknowledged-without-passage, or <8 s since the last one → pass or reconcile |
-| Open → 409 "Fresh healthy sensor feedback…" | Live lane without a heartbeat in the last 10 s |
-| Review → 409 "Review expired" | More than 5 min since the event |
+| Open → 409 "recent or unresolved command" | Command on lane is Unknown/Pending/Acknowledged-without-passage, or less than the lane cooldown (default 8 s) since the last one → pass or reconcile |
+| Open → 409 "Fresh healthy sensor feedback…" | Live lane without a heartbeat within the lane's heartbeat freshness (default 10 s) |
+| Review → 409 "Review expired" | Longer than the lane's review window (default 5 min) since the event |
 
 ---
 
@@ -693,7 +746,230 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-014 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1, done last) | Vietnamese UI and Excel (GC-39) | High | Done for parking UI; legacy face pages still English |
+| CR-013 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 7) | Throughput: lock released during barrier I/O, auto-open queue, load test, pilot runbook | High | Done; measured locally, not on the station PC |
+| CR-012 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 6) | Search, statistics, Excel export | High | Done, locally tested |
+| CR-011 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 5) | Alert lifecycle, device health, video wall | High | Done, locally tested; streaming not tried |
+| CR-010 | 2026-09-25 | ThanhTranFPT-98 (Plan V2 §3.8, Phase 4) | Who is inside, shifts, overstay, station sync (option E) | High | Done, locally tested (2 stations on one PC) |
+| CR-009 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 3) | Gate operations: categories, walk-in, exit matching, inspection photo | High | Done, locally tested |
+| CR-008 | 2026-09-25 | ThanhTranFPT-98 (Plan V2 §3.9, Phase 2+4) | Person lanes, face terminals, PPE + FaceID | High | Done, locally tested; blocked on site by Q7 |
+| CR-007 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 2) | Third-party AI camera receiver, merge, latency (GC-05/22/24) | High | Done, locally tested; real camera not tried |
+| CR-006 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Plate formats per site (GC-43) | Medium | Done, locally tested |
+| CR-005 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Area scope for accounts (GC-37) | High | Done, locally tested |
+| CR-004 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable roles, permissions, account expiry (GC-36/37) | High | Done, locally tested |
+| CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
+| CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-014 — Vietnamese UI and Excel (GC-39)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98: "Vietnamese required in all site including UI". It was done last on purpose, because every earlier phase changed the UI.
+- **Built:**
+  - `ui/src/i18n.js`: `t()` (the English text is the key and the fallback; codes like `CATEGORY_REVIEW:Delivery` translate the prefix) and `tk()` for column keys. **Vietnamese is the default**; the choice is stored per browser (`localStorage`), and the VI/EN button is in the header. Ant Design uses `vi_VN` (dates, pagination, empty states).
+  - `ui/src/locales/vi.json`: 460 entries. It covers every label, button, tab, column, message, code (outcomes, reasons, statuses, severities, roles, categories) and about 60 common server error messages.
+  - The `field()`/`cols()` helpers translate automatically. The other strings were wrapped by a pattern script and checked by hand.
+  - Excel export: sheet names, headers and labels in Vietnamese by default (`lang=en` for English); the UI sends the current language.
+- **Guards against regressions:**
+  - `python tests/i18n_check.py` fails if any `t('…')` text, column key, field label or known API code has no Vietnamese entry (0 missing now).
+  - `node tests/ui_smoke.mjs` now requires the page to render in Vietnamese by default, with no English tab labels.
+  - A scan of the rendered Admin page found no English text left (the only hit was "Camera & video", which is also the Vietnamese wording).
+- **Not translated:** the legacy face pages (Dashboard, Monitor, Employees, Strangers, Access logs; Admin-only, from the original face app); server messages not in the dictionary (shown in English); data typed by users.
+- **Verification:** all suites green: `ParkingCore.Tests` 142, `ParkingSimulation.Tests` 14, `integration_parking.py` 11 (incl. Vietnamese sheet names), UI smoke 4 roles, i18n check, `test_backup.py`. `test_plate_service.py` can't import on this machine (missing `python-multipart`; pre-existing environment gap, AiService not changed).
+
+### CR-013 — Throughput under load (GC-22, GC-23) and pilot runbook
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. The GC-23 note asked what the throughput risk means; Plan V2 §3.4 explains it as "one cashier for all lanes". The plan was to measure it, not guess.
+- **Measured first:** `tests/load_test.py` (new) sends AI-camera messages on 2 live lanes with auto-open, a barrier controller that answers in 2 s, and heartbeats with passage reports. **Before the fix: decision latency P95 = 16.7 s and 10/40 vehicles not decided by the end.** Two causes:
+  1. `Open()` held the global lock during the controller HTTP call (up to 5 s).
+  2. The camera inbox worker waited for the auto-open, including the HTTP call, before it handled the next message.
+- **Fix:**
+  1. `Open()` is split into three steps: validate + store the `Pending` command under the lock; call the controller **without** the lock; take the lock again to store the result. This is safe because the stored `Pending` command already blocks any other opening on that lane (existing rule), and the unique `EventId` index blocks duplicates.
+  2. `ParkingService.Ingest` no longer waits: it queues the auto-open on `AutoOpenQueue`. `AutoOpenWorker` runs up to 4 openings in parallel, each in its own DI scope.
+  3. `ConfirmPassage` also accepts a `Pending` command, because a fast controller can report the passage before our HTTP call returns its ack.
+- **After the fix (same machine):**
+  - Traffic every 3 s per lane: P95 t1→t2 = 0.30 s, all 40 decided. 10 vehicles were correctly held (`AUTO_OPEN_HELD`) because they came faster than a barrier cycle (≈ 4.5 s).
+  - Traffic every 5 s per lane (3.6× the reference peak of 18 s per lane): **40/40 opened, P95 t1→t2 = 0.21 s, t1→t3 = 0.35 s, t3→t4 = 2.18 s (the controller's own delay)**. PASS against the proposed target "our part ≤ 1 s".
+- **Regression:** `ParkingCore.Tests` 142, `ParkingSimulation.Tests` 14 (incl. concurrent retries → one command), `integration_parking.py` 11 OK (incl. bad ack → Unknown, no second opening before passage).
+- **Pilot runbook:** `docs/PILOT_RUNBOOK.md` gets a "Plan V2 commissioning" section with 10 ordered steps, each with a visible check.
+- **Not done (needs the site):** load test on the real i3/8 GB station PC with the real controller delay; the pilot itself.
+
+### CR-012 — Search, statistics, Excel export (GC-33, 34, 35, 20)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. GC-34 note: "Design it". GC-35 note: stats by month, year, shift and area; for parking it's different, because shifts belong to underground workers. Q4 was still open, so both groupings are offered.
+- **Built (`ParkingCore/Reports.cs`):**
+  - One `ReportFilter` (time range, area, lane, outcome, reason contains, source, plate, person, shift) is used by all three endpoints, limited by the account's areas:
+    - `GET search`: paged, 10–500 rows per page.
+    - `GET stats?groupBy=day|month|year|hour|shift|lane`: in the site's local time. Hour of day is meant for parking, shift for the mine. Columns: events, allow, deny, review, guard-approved, entries passed, exits passed.
+    - `GET export`: ClosedXML, 5 sheets, max 100,000 events, audited `ExportExcel:<n> events`. Sheets:
+      - **Overview:** who, when, time zone, filters, totals, alerts by severity, false-alarm rate.
+      - **Events:** local time, area, location, lane, direction, plate, person, category, outcome, reason, source, guard, shift, PPE, decision ms, command, passage time, alert status, evidence ID and SHA-256.
+      - **By area:** events, entries, exits, denied, reviews, alerts, inside now.
+      - **Performance:** mean / median / P95 of t1→t2, t1→t3, t3→t4, alert→acknowledged and alert→closed.
+      - **Evidence:** ID, kind, size, SHA-256, taken by, kept until.
+  - `AccessEvent.Shift` is stored at decision time (GC-20).
+  - New permission `ViewReports` (Admin, SafetyOfficer, Manager).
+  - **Upgrades of built-in roles.** `Role.SeedVersion` + `Perm.Introduced`: permissions added in a later version are given once to built-in roles seeded earlier. Permissions an admin removed stay removed.
+  - UI: *Reports & audit* tab with the filter form, paged results, statistics table with bars, and "Export Excel" using the same filter.
+- **Found and fixed while testing:** three UI state variables were used before they were declared. The page would have crashed at runtime although `vite build` passed. A new **UI smoke test** (`tests/ui_smoke.mjs`) server-renders the Parking page for Admin, Guard, Viewer and Technician and fails on such errors. It was checked by deliberately inserting a use-before-declaration (4 failures reported), then reverted.
+- **Verification:** `ParkingCore.Tests` 142 passed (7 new: percentile maths, local-time buckets across midnight, role upgrade adds new permissions once and keeps removals). `integration_parking.py` 11 OK. New `test_search_stats_and_excel` covers: filters, stats by lane and day, an xlsx with the 5 named sheets that contains only rows matching the filter plus the filter text, the audit entry, and Guard 403 on export. `node tests/ui_smoke.mjs` passes for 4 roles.
+- **DB migration:** `Reporting` / `ReportingSqlServer` (`SeedVersion` default 1 for existing roles).
+
+### CR-011 — Alert lifecycle, device health, video wall (GC-25, 26, 27, 29)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98 (Plan V2 Phase 5; GC-29 note: "Design live video wall for RTSP streams grouped by area").
+- **Built:**
+  - **GC-25.** `ParkingAlert.Status` goes Open → Acknowledged (`acknowledge`, records who and when) → Resolved or FalseAlarm (`resolve`, note of at least 3 characters **required**). `FalseAlarm` needs the new permission `MarkFalseAlarm` (Admin, SafetyOfficer). `Resolved` stays as the "closed" flag for queries and the webhook. The migration marks previously resolved alerts as `Resolved`. Alerts the system clears itself (recording resumed, device sending again) are auto-resolved with a note.
+  - **GC-26.** The UI shows severity colours, lane and area per alert, a header tag coloured by the worst open alert, and a **beep** when a new High/Critical alert appears (browsers allow sound only after the page has been clicked once). Video clip ±10 s exists since CR-001. Drawn detection boxes are not built: the AI cameras send no box coordinates.
+  - **GC-27.** Any message from an AI device updates `Camera.LastMessageUtc`; T1550 alarm-only messages act as a heartbeat. `Camera.SilentAlertSeconds` → alert `CAMERA_SILENT:<camera>`, auto-resolved when the device sends again. Recording health (`CAMERA_NOT_RECORDING`) and lane controller heartbeats already existed.
+  - **GC-29.** `GET video/wall` lists cameras grouped by area and limited by the account's areas, with recording state. The *Video wall* tab shows a 1/4/9/16 grid per area; each tile is `<Video:GatewayUrl>/<cameraId>/` (MediaMTX WebRTC page, no re-encoding). A tile's border turns red when its lane has a High/Critical alert. `Camera.WallSourceProtected` holds an optional sub-stream (encrypted). `GET video/gateway-config` generates `mediamtx.yml` with `sourceOnDemand`: Admin only, audited, `no-store`, because it contains camera passwords.
+- **Verification:** `ParkingCore.Tests` 135 passed (7 new: lifecycle rules, false-alarm permission, upgrade of old resolved alerts). `integration_parking.py` 10 OK. New `test_monitoring_alerts_wall_and_device_health` covers: Guard acknowledges once; resolve without note 409; Guard false alarm 409; SafetyOfficer false alarm OK and alert leaves the open list; wall lists the camera; gateway config contains the sub-stream for Admin and gives 403 for Guard; a silent AI device raises `CAMERA_SILENT` from the maintenance loop.
+- **Not verified:** real streaming through MediaMTX (not installed here; no camera). The wall was not opened in a browser. Sound depends on browser autoplay rules.
+- **Config:** `Video__GatewayUrl` (e.g. `http://station:8889`).
+- **DB migration:** `MonitoringAndAlerts` / `MonitoringAndAlertsSqlServer` (status default + SQL update for old alerts).
+
+### CR-010 — Who is inside, shifts, overstay, station sync (GC-18, 19, 20, 03; Plan V2 §3.8 option E)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. Decisions from the plan discussion: a worker enters at Gate I and leaves at Gate II (different station PCs); only small in/out records are synced (not DBs); option E = LAN between stations + cloud; an exit is never blocked by sync.
+- **Built (`ParkingCore/Presence.cs`):**
+  - `PresenceRecord` is written for every **sensor-confirmed** passage on a lane that belongs to an area. It holds: EventId (unique), StationId (`Parking:StationId`, default machine name), **AreaCode** (codes are agreed per site; IDs differ per DB), subject (`P:<person>` / `V:<plate>`) with name, In/Out, passage time, lane, and shift.
+  - "Inside" is computed by replaying records in **passage-time order**, not arrival order, per area and subject. Exits without an entry and double entries are listed, not hidden. A guard can close a stale presence with a mandatory note (audited, `Source=Manual`).
+  - **Shifts** per area (HH:mm local; overnight shifts supported); the shift name is stored on each record. **Overstay:** `Area.OverstayMinutes` → alert `OVERSTAY:<area>:<subject>:<since>` from the maintenance loop.
+  - **LAN path:** `PresenceSyncWorker` pushes this station's own records to `Sync:Peers` every second (`POST /api/v1/parking/sync/presence`, header `X-Sync-Key`, per-peer cursor). The receiver inserts by EventId, so duplicates and echoes are ignored.
+  - **Cloud path:** presence records go through the existing outbox to `{site}/presence/{upload time}-…`, which sorts by upload time. Other stations list `Sync:CloudPeers` sites every 30 s with a key cursor. `IObjectStorage` gained `ListAsync`/`GetAsync` (Folder + S3).
+  - Parking sessions are now created only for vehicle lanes with a plate. Before this, a person-lane passage would have created an empty-plate session.
+  - GC-31: `AccessEvent.EvidenceSha256` is taken when the event is created.
+- **Verification:**
+  - `ParkingCore.Tests` 128 passed (9 new: out-of-order arrival, unmatched exit, double entry, manual close, day and overnight shifts). The cloud path end to end uses a shared folder: A uploads through the outbox, B pulls it, a second pull adds nothing, A's later exit reaches B, and A ignores its own echoed record.
+  - `integration_parking.py` 9 OK. The new `test_presence_across_two_stations` runs **two real API processes**. Worker 7 enters at Gate I and appears inside at Gate II. He exits at Gate II, and Gate I then shows nobody inside with no unmatched records. Gate II is stopped while worker 8 enters; after restart Gate II receives the record.
+- **Not verified:** two physical PCs on the customer LAN (Q9); S3 listing against a real provider; overstay alert timing in a running system (the logic is unit-tested; the maintenance loop has no test hook).
+- **Q5 still open:** without an HR roster, "missing" means "entered and not exited". The *Inside now* list at shift end is that report.
+- **DB migration:** `PresenceAndSync` / `PresenceAndSyncSqlServer`.
+
+### CR-009 — Gate operations: categories, walk-in, exit matching, inspection photo (GC-12, 13, 15, 16, 17, 30, 31)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98 (Plan V2 Phase 3; GC-17 note: "the guard takes the photo when they want").
+- **Built:**
+  - **GC-15.** `RegisteredVehicle.Category` (Registered / Guest / Delivery) and `ValidUntilUtc`. An expired registration → ManualReview `REGISTRATION_EXPIRED` (a valid pass still admits it). Categories in `SiteSettings.ReviewCategories` (default `Delivery`) always go to the guard (`CATEGORY_REVIEW:<cat>`).
+  - **GC-16.** `POST visits/walk-in` creates a `Visit` of kind `WalkIn` from now until the next local day start. Configured by `SiteSettings.WalkInResetHour` (default 00) and `TimeZone` (default `Asia/Ho_Chi_Minh`); UI form in *Visitors*.
+  - **GC-12.** Lane option `ExitRequiresEntry`: an exit with no open session → ManualReview `EXIT_WITHOUT_ENTRY` instead of opening. `GET events/{id}/entry` returns the matching entry event and its photos. The *Photos / entry* window shows the entry and exit images side by side.
+  - **GC-13.** The session stores `EntryPersonId`. If the exit identifies a different person → ManualReview `EXIT_PERSON_MISMATCH`.
+  - **GC-17, 30, 31.** Guard photos: upload from the browser/phone camera (`POST events/{id}/photos`), or one frame from the lane camera (`…/photos/camera`, needs ffmpeg + RTSP). Stored as `EvidenceImage` (kind `Inspection`, SHA-256 at capture, taken by, note). Viewing is audited and limited by area. Lane option `RequireInspectionPhoto` adds one more gate in `Open()`. Overview images from AI cameras are also `EvidenceImage` rows with a hash.
+- **Verification:** `ParkingCore.Tests` 119 passed (6 new: next-day reset incl. 23:59 and a 06:00 reset hour, expired registration vs pass). `integration_parking.py` 8 OK. New `test_gate_operations` covers: Delivery → guard; walk-in ends within 24 h and admits the plate; exit without entry → guard; inspection lane refuses to open (409) until a photo is uploaded, then opens; photo download matches the bytes; after passage, the exit event finds its entry and photo.
+- **Not verified:** the camera frame grab (ffmpeg not installed here). The phone-camera upload was tested as a plain file upload only.
+- **Bug found and fixed in the UI:** date fields in edit forms showed UTC as local time and would shift by 7 h on every save. They now use `toLocalInput`.
+- **DB migration:** `GateOperations` / `GateOperationsSqlServer` (defaults set for upgraded rows).
+
+### CR-008 — Person lanes, face terminals, PPE + FaceID (GC-10, GC-06, §3.9 of Plan V2)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. The user agreed to the PPE + FaceID design in Plan V2 §3.9. **This reverses the 2026-09-24 decision "PPE excluded".**
+- **Built:**
+  - **Person lanes.** `Lane.Subject` = `Vehicle` | `Person`. A person lane must use the `FaceOnly` (or `ManualReview`) policy. The face counts only if the person is on the access list: `AuthorizedPerson` (PersonId, name, code, active, valid-until). Managed in the *People* tab, new permission `ManagePeople` (Admin, Manager).
+  - **Face terminals.** They send to the receiver with the `generic` adapter (`personId`, `confidence`). The ID is the terminal's PIN, or our face DB ID for the ArcFace demo (GC-06). Mapping and `TrustedConfidence` work as for plate cameras.
+  - **PPE.** PPE cameras send to `/receiver/ppe` (`deviceId, channel, peopleInRoi, items{helmet:true,…}, capturedUtc?`, plus a frame counter or timestamp). Readings are cached per lane in memory (`PpeCache`, O1). When a face arrives on an entry lane with `PpeRules`, `PpeRules.Decide` applies these rules:
+    - Only readings within `SiteSettings.PpeWindowSeconds` (default 3 s) count.
+    - There must be **exactly one person** in the ROI, or the case goes to the guard (O2).
+    - A **required** item must be seen missing in `PpeConfirmCount` readings (default 2) to deny. A single reading only sends the case to review (O4).
+    - Per item: `required` / `warn` / `ignore` (O5).
+    - With no reading, `PpeMissingMode` decides: `Review` or `AllowAlert` (O6).
+    - PPE is checked on entry only (O7).
+  - **PPE can only tighten a decision.** It can turn an Allow into Deny or Review, never the other way. The result is stored on the event (`PpeOutcome`, `PpeSummary`); warnings raise an alert.
+  - A PPE refusal is **not merged**, so a worker who puts the helmet on can be read again at once.
+- **Verification:**
+  - `ParkingCore.Tests` 113 passed (13 new: PPE rules/decisions for all O-options, cache, person validity). It also checks that **an upgraded DB gets default values 10/3/2 and `Vehicle`/`Review`, not 0/empty**: a real bug in the generated migrations, fixed here and in CR-007's migration.
+  - `integration_parking.py` 7 OK. New `test_person_lane_face_terminal_and_ppe` covers: person lane validation; face + PPE ok → Allow; helmet missing twice → Deny `PPE_MISSING:helmet`; two people in ROI → ManualReview; person not on the list → ManualReview.
+- **Found while testing:** the receiver stores identical bodies once (retry protection). PPE cameras **must** include a frame counter or timestamp; otherwise two identical readings count as one.
+- **Q7 answered (2026-09-25, ThanhTranFPT-98):** "Q7 must be combined with the PPE camera result." Requirement: **the flap opens only after face + PPE are combined**; the ZKTeco terminal must not open it on a face match alone. Wiring options for the site:
+  - **A (recommended):** ZKTeco in *verify only* (its relay output not connected to the flap) → it sends the result to our receiver → our policy combines it with PPE → our I/O relay controller opens the flap. One decision point, every pass logged with its reason.
+  - **B:** ZKTeco's relay kept but wired in series (AND) with our "PPE OK" relay. Hardware interlock; more wiring and both relays must be timed together.
+  - Software for A is already built (CR-008). The flap lane needs `autoOpen` on, and its I/O controller must send the same heartbeat as a barrier (`vehiclePresent` = person in the lane, `barrierState` = flap closed). **Still open: Q3** (how ZKTeco sends results: SDK / ADMS push / DB); the `generic` adapter is the placeholder.
+- **DB migration:** `PeopleAndPpe` / `PeopleAndPpeSqlServer` (defaults edited by hand, see above).
+
+### CR-007 — Third-party AI camera receiver, merge, latency (GC-05, GC-22, GC-24)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. Plan V2 Phase 2, implementing stages 1–2 (and the "trusted source" part of stage 3) of `docs/THIRD_PARTY_CAMERA_PLAN.md`.
+- **Built (`ParkingCore/Receiver.cs`):**
+  - **Receiver.** Preferred path: `POST /api/v1/parking/receiver/{adapter}?key=<Receiver:Key>` (key ≥ 32 chars, constant-time compare). Some cameras can only post to `host:port/api` (the T1550 capture). For those, `POST /api` is served **only** on `Receiver:Port` and only to `Receiver:AllowedIps` (IP or CIDR list); every other path on that port returns 404. Neither path uses user cookies or CSRF.
+  - **Store before ACK.** The JSON is checked (max depth 32, 16 MB request limit), saved in `CameraInbox`, then answered 200 `{"result":"ok"}`. The same body (SHA-256) seen again within 1 h is ACKed but stored once.
+  - **Worker.** `CameraInboxWorker` is woken immediately by `InboxSignal` (no polling delay; 5 s fallback). It runs the adapter and handles each observation. Malformed messages become `Failed` with an error and never block the queue. Alarm-only messages become `Ignored`.
+  - **Adapters.** `t1550`: `SnapId` → plate, `StrChn` → channel, MAC → device, `PlateImg` (evidence) and `BgImg` (overview, `EvidenceImage`). `StartTime` is Unix seconds and is used only when within 24 h of receive time. `generic`: common JSON for other vendors and face terminals (`deviceId, channel, plate?, personId?, confidence?, capturedUtc?, plateImage?, overviewImage?, id?`).
+  - **Mapping.** `Camera.ExternalDevice` (MAC without separators) + `ExternalChannel` → camera → its lane. Unknown device → alert `UNKNOWN_CAMERA:<device>/<channel>`, no event.
+  - **Trust.** The camera sends no confidence. `Camera.TrustedConfidence` is null by default, so results always go to guard review. An admin sets it only after field evaluation (same idea as `ApprovedPlateModel`).
+  - **Merge (GC-24).** Same plate/person on the same lane within `SiteSettings.MergeWindowSeconds` (default 10) → one event.
+  - **Latency (GC-22).** `AccessEvent.ReceivedUtc` (t1), `CreatedUtc` (t2), `DeviceCommand.CreatedUtc` (t3), `AckUtc` (t4), plus `CapturedUtc` from the camera when known. The UI shows the decision time per event.
+  - **Path to a decision.** Everything goes through the new `ParkingService.Ingest` → `Observe` (same policy) → optional auto-open. A camera message never opens the barrier by itself.
+  - **Housekeeping.** The inbox payload is cleared 7 days after processing (30 days for failed messages). Inbox counts and the latest errors are shown in *Device health*.
+- **Verification:**
+  - `ParkingCore.Tests` 100 passed (11 new: adapter parsing, missing confidence stays null, broken image dropped, alarm-only, generic/face, CIDR allow-list). **The real `../tcp` capture replays through the adapter: 43/43 messages parsed, 7 plate observations, 14 images decoded.** This matches the acceptance of THIRD_PARTY_CAMERA_PLAN stage 2. The capture is read only if present and is not in the repo.
+  - `integration_parking.py` 6 OK. New `test_third_party_camera_receiver` covers: wrong key 401; retry stored once; second sighting merged; untrusted camera → ManualReview with evidence and receive time; trusted camera + registered plate → Allow; unknown device → alert and no event; alarm-only → Ignored; fixed-path `POST /api` works on the receiver port only (other paths 404 there, refused on the normal port).
+- **Not verified / open:** no real camera was pointed at the receiver. The camera's expected ACK body and retry behaviour are unknown (Q1). The Receiver port must be opened in the station firewall only toward the camera network. OCR fallback on `PlateImg` (plan stage 3, branch B) is not built.
+- **Config:** `Receiver__Key`, `Receiver__Port`, `Receiver__PortAdapter` (default `t1550`), `Receiver__AllowedIps`. For the port path, add the port to `--urls` (e.g. `http://0.0.0.0:5085;http://0.0.0.0:2123`).
+- **DB migration:** `CameraReceiver` / `CameraReceiverSqlServer`.
+
+### CR-006 — Plate formats per site (GC-43)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98 (Plan V2 Phase 1).
+- **Built:** `SiteSettings.PlatePatterns` holds one regex per line, matched against the normalized plate (no spaces, dots or dashes). Empty = the built-in Vietnamese civilian formats, so behaviour is unchanged. `PlateRules` anchors each pattern (`^(?:…)$`) and runs it with a 50 ms timeout, so a bad admin regex can't hang a decision. Invalid patterns are refused before saving (409). Used by the policy, burst consensus, vehicle registration and visitor passes. `PUT /api/v1/parking/settings/plates` (ManageSite). UI: *Lane settings* → *Plate formats*.
+- **Not changed:** the demo OCR in `AiService/plate_service.py` keeps its own Vietnamese regex. Third-party AI cameras are now the plate source (Plan V2), so the demo OCR stays as it is.
+- **Verification:** `ParkingCore.Tests` 89 passed (7 new: default kept, custom accept/replace, anchoring, invalid regex, policy uses site rules). `integration_parking.py` 5 OK (plate formats added to `test_configurable_timings`: invalid 409, custom plate accepted, VN plate refused once custom). UI builds; not clicked through.
+- **DB migration:** `PlatePatterns` / `PlatePatternsSqlServer`.
+
+### CR-005 — Area scope for accounts (GC-37)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. Plan V2 §5.6: "a Guard scoped to Gate II can't see Gate I".
+- **Interpretation:**
+  - `UserArea (UserId, AreaId)`. **No rows = all areas**, so existing accounts are unchanged. Admin accounts can't be limited.
+  - A limited account only sees lanes in its areas, plus their events, commands, sessions, alerts, cameras, evidence and video. It can only act on those lanes (simulate, recognize, review, open, passage, acknowledge, reconcile). Any other lane → **403** "outside your areas".
+  - Configuration is site-wide, so `ManageSite` and `ManageUsers` require an account **without** area limits. A limited Technician is refused, not partly allowed.
+  - Vehicles and visitor passes stay site-wide: a registered plate can use any gate.
+  - Alerts without an event are matched by the lane ID in their reason (`DEVICE_OFFLINE:<lane>`, `TAILGATING:<lane>`, `SAFETY_FAULT:<lane>`). Other system alerts (upload backlog, clock drift, camera recording) are only shown to accounts without limits.
+- **Where enforced:** in the controllers, through one scoped service (`AreaScope`). `ParkingService` stays unaware of users, because device calls have no user.
+- **DB migration needed?** Yes — `UserAreas` (SQLite) and `UserAreasSqlServer`.
+- **Extra rule found while building:** an area that limits an account can't be deleted (FK `Restrict` plus a 409 check). Otherwise, deleting it would silently turn a limited account into an unlimited one.
+- **Status:** Done (2026-09-25), locally tested.
+- **Result / verification:**
+  - Code: `ParkingCore/AreaScope.cs` (`UserArea`, `AreaScope`, `AreaForbiddenException`), checks in `ParkingController` (snapshot, history, simulate, recognize, review, open, alerts, reconcile, passage, evidence), `VideoController` (cameras, event video, play), `AreaController` (visible areas), health lanes, `PermissionHandler` (ManageSite/ManageUsers need an unlimited account), `Security.cs` (`areaIds` on create/update/list/me). UI: area picker and column in *Operators & roles*.
+  - `ParkingCore.Tests` → 82 passed (9 new). `ParkingSimulation.Tests` → 14. `integration_parking.py` → 5 OK. The new `test_area_scope` checks that a Gate II guard sees only Gate II lanes, events, areas and alerts. It also gets 403 on simulating, reviewing, or resolving an alert at Gate I. Admin can't be limited (409), the area can't be deleted (409), and a limited Technician gets 403 on area config.
+  - Not run: `tests/integration_video.py` (needs ffmpeg, not installed). The video endpoints got area checks but no video test.
+  - UI: `vite build` succeeds. **Not clicked through in a browser.**
+
+### CR-004 — Configurable roles, permissions, account expiry (GC-36/37)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98 ("We need to design roles"). Plan V2 §5.6.
+- **Requirement:** roles are data, not code. Reference set: Viewer, Guard (operator), Safety officer, Manager, Technician, Admin. Accounts can have an expiry date. (Area scoping is split into CR-005.)
+- **Interpretation:**
+  - Endpoints check a **permission** (`[Authorize(Policy = Perm.X)]`), never a role name. Permissions: `ViewLive`, `ViewEvidence`, `OperateLane`, `ManageVisitors`, `HandleAlerts`, `ManageVehicles`, `ManageSite`, `ManageUsers`, `ViewAudit`, `Reconcile`.
+  - Tables `Role` (code, name, built-in flag) and `RolePermission`. Built-in roles are seeded when missing. `Admin`, `Guard` and `Auditor` keep **exactly** their old rights, so existing accounts behave the same. `Viewer`, `SafetyOfficer`, `Manager` and `Technician` are new.
+  - `ParkingUser.ExpiresUtc`: an expired account can't sign in, and an open session is rejected on the next request (same path as deactivation).
+- **Safety rules (privilege escalation / lockout):** `Admin` always has every permission and can't be edited. Only an Admin can edit roles or give someone the Admin role. You can't change your own role, expiry or active state. The last active Admin can't lose Admin or expire. `Device` principals never get user permissions. Every change is audited.
+- **DB migration needed?** Yes — `ConfigurableRoles` (SQLite) and `ConfigurableRolesSqlServer`.
+- **Status:** Done (2026-09-25), locally tested.
+- **Result / verification:**
+  - Code: `ParkingCore/Roles.cs` (`Role`, `RolePermission`, `Perm`, `RoleCatalog`, `PermissionHandler`, `RoleController`), `Setup.cs` (policies, seeding, expiry check), `Security.cs` (login expiry, `me` returns permissions, `PUT users/{id}`, role validation), every `[Authorize(Roles=…)]` in ParkingCore replaced by a permission policy. UI: `AuthContext` gets `permissions`, `Parking.jsx` uses `can(...)`, *Operators & roles* tab (create/edit with expiry, permission matrix, role editor for Admin).
+  - `ParkingCore.Tests` → 73 passed (19 new: seeding, old rights preserved for Guard/Auditor, Admin fixed, Device none, custom role, re-seed keeps edits, self-change, escalation, last-admin, expiry, delete rules). `ParkingSimulation.Tests` → 14. `integration_parking.py` → 4 OK. The new `test_roles_permissions_and_expiry` covers: Technician can manage the site but gets 403 on simulate and audit; a ManageUsers-only account can't create or grant Admin and gets 403 when editing roles; an expired account gets 401 at login; an open session gets 401 after the account is expired. The unchanged older test confirms Guard/Auditor still get the same 403s as before.
+  - UI: `vite build` succeeds. **Not clicked through in a browser.**
+  - Not changed: legacy face APIs and `NotificationHub` remain Admin-only by role (unchanged middleware).
+
+### CR-003 — Configurable timings: site defaults + lane overrides (GC-44)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. Plan V2 Phase 1, §3.6 of `../PARKING_PLAN_V2.html`.
+- **Requirement:** decision validity, review window, lane cooldown, heartbeat freshness and offline-alert time must be configurable per site and per lane (e.g. motorbike lane cooldown 4 s, cargo-check lane decision validity 60 s), without a new software version.
+- **Interpretation:** a single-row `SiteSettings` table holds the site defaults (same values as the old constants, so behaviour is unchanged after upgrade). `Lane` gets five nullable override columns; empty = use the site default. `LaneTimings.Resolve(site, lane)` is the only place that combines them. Admin edits both in *Lane settings*.
+- **Safety bounds (validated on input):** decision valid 5–300 s; review window 30–3600 s; cooldown 2–120 s; heartbeat fresh 2–60 s; offline alert 10–600 s. The cooldown can't be 0: it's one of the double-opening guards.
+- **Not included:** maintenance tick (15 s), AI timeout (20 s) and device HTTP timeout (5 s). These are infrastructure settings, not site rules, and stay in code/config.
+- **DB migration needed?** Yes — `SiteTimings` (SQLite) and `SiteTimingsSqlServer`.
+- **Status:** Done (2026-09-25), locally tested.
+- **Result / verification:**
+  - Code: `Domain.cs` (`SiteSettings`, lane override columns, `LaneTimings.Resolve`, `ParkingDb.Timings`), `SiteProfile.cs` (`TimingInput` bounds, `GET/PUT settings/timings`), `ParkingService.cs` (Observe/Review/Open use the lane's timings), `Maintenance.cs` (offline threshold per lane), `Setup.cs` (default row), UI *Lane settings*.
+  - `ParkingCore.Tests` → 54 passed (6 new: defaults equal old constants, override precedence, missing row, zero cooldown rejected). `ParkingSimulation.Tests` → 14 passed. `integration_parking.py` → 3 OK. The new `test_configurable_timings` checks that the site default and a lane override both change the event expiry, and it also checks the bounds (400), the audit entry and Guard 403. The old workflow test passed unchanged, so behaviour with the default values is the same as before.
+  - UI: `vite build` succeeds. **Not clicked through in a browser.**
+  - Not tested: the offline alert with a per-lane threshold (the maintenance loop has no test hook; the resolver it uses is tested).
+
+### CR-002 — Areas and locations (GC-01)
+- **Date / requested by:** 2026-09-25, ThanhTranFPT-98. First step of Plan V2 Phase 1 (`../PARKING_PLAN_V2.html`).
+- **Requirement:** "We need to design Area, location field in the DB" (note on GC-01). Hierarchy *Area → Location → Lane → Camera*; screens and reports can be filtered by area; areas can be added from the UI while running (GC-08).
+- **Interpretation (what we will build):**
+  - Entities `Area` (Code unique, Name, Kind = `Mine | VehicleGate | ParkingLot | Other`) and `Location` (AreaId, Name unique within its area). `Lane.LocationId` (nullable FK). Camera stays linked to a lane, so it inherits the area.
+  - On startup, make sure the `DEFAULT` area + "Default location" exist and attach every lane without a location (the default area can be renamed but not deleted or re-coded). Existing sites keep working unchanged. A lane saved without a location goes to the default location.
+  - Admin endpoints to create/edit/delete areas and locations. Delete is refused while children exist (never cascade-delete lanes). All changes audited.
+  - History search gets an `areaId` filter. UI: *Areas* tab (admin), location picker in *Lane settings*, area filter on the lane monitor.
+- **Acceptance criteria:** an admin creates an area + location and moves a lane into it while the API runs; the history filtered by that area only shows that lane's events; deleting a non-empty area/location returns 409; an upgraded database has every lane in `DEFAULT`.
+- **Design decisions:** real foreign keys with `Restrict` (the data is small and config-like, so integrity is worth it); area permissions for users come in the Roles step, not here; area is not copied into outbox records yet (the lane → area mapping is config and can be joined later by the central platform).
+- **DB migration needed?** Yes — `AreasAndLocations` (SQLite) and `AreasAndLocationsSqlServer`.
+- **Status:** Done (2026-09-25), locally tested; not tried on a SQL Server instance.
+- **Result / verification:**
+  - Code: `ParkingCore/Areas.cs` (`AreaCatalog` rules + `AreaController`), `Domain.cs` (entities, FKs), `ParkingController.cs` (lane `locationId`, `areaId` filter), `Setup.cs` (default area at startup), `ui/src/pages/Parking/Parking.jsx` (*Areas* tab, location picker, area filters). Migrations `20260925070853_AreasAndLocations` and `20260925070856_AreasAndLocationsSqlServer`.
+  - `dotnet run --project tests/ParkingCore.Tests` → 48 checks passed (13 new), including the upgrade from the previous SQLite schema with an existing lane (SQLite rebuilds the `Lanes` table to add the FK).
+  - `dotnet run --project tests/ParkingSimulation.Tests` → 14 passed. `python tests/integration_parking.py` → 2 tests OK (new `test_areas_and_locations`: default area, create, duplicate 409, lane placement, bad location 409, area filter, delete protection, audit, Guard 403).
+  - UI: `vite build` succeeds. **Not clicked through in a browser.**
+  - Assumed, not verified: the SQL Server migration (generated by EF, never applied to a real SQL Server here).
 
 ### CR-001 — Store data in the cloud now; central platform deferred
 - **Date / requested by:** 2026-09-24, Than Uông Bí (reported by ThanhTranFPT-98)
@@ -835,8 +1111,10 @@ Order matters: each phase is usable and testable on its own, and phases 1–4 wo
 - [ ] Entity changed → add EF migrations for **both** providers (`ParkingDb` and `ParkingSqlServerDb`).
 - [ ] New mutating endpoint → goes under `/api/v1/parking`, has a role `[Authorize]`, calls `db.Log(...)` (audit), and uses `Mutate(...)` or `mutex.Gate` if it touches lanes/commands/events.
 - [ ] New camera/AI input → goes through `ParkingService.Observe`, never straight to `Open`.
+- [ ] New endpoint that reads or acts on a lane/event/command/alert → check `AreaScope` (`Ensure…` or filter by `Lanes()`).
 - [ ] Anything that opens a barrier → must keep every gate in `Open()` (section 8.1).
-- [ ] UI → role-gated (`admin` / `operator` flags in `Parking.jsx`).
+- [ ] New endpoint → `[Authorize(Policy = Perm.X)]` with an existing permission (or add one to `Perm` + the built-in roles). Never `Roles = "…"`.
+- [ ] UI → permission-gated (`can('X')` in `Parking.jsx`).
 - [ ] Update this file: features table, API table, bug/CR log.
 - [ ] Run the tests in section 14.
 
@@ -845,7 +1123,7 @@ Order matters: each phase is usable and testable on its own, and phases 1–4 wo
 **Limits (by design):**
 
 - One API process per site. `ParkingLock` is an in-process semaphore, not a distributed lock.
-- All state-changing parking operations are serialised by one global lock. That's simple and safe, but throughput is limited.
+- All state-changing parking operations are serialised by one global lock. That's simple and safe. Since CR-013 the lock is **not** held during the barrier controller HTTP call (the stored `Pending` command protects the lane), and camera auto-opens run on their own queue.
 - A visitor entry is spent when opening is *requested*, even if the barrier outcome is unknown.
 - The audit log is append-only through the app only. A DBA can still change it.
 - OCR is a baseline with no measured accuracy.

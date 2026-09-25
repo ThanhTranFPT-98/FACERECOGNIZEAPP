@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MyfirstASP_NET.ParkingCore;
 
-[Authorize(Roles = "Admin,Guard,Auditor")]
+[Authorize(Policy = Perm.ViewLive)]
 public class ParkingHub : Hub { }
 
 public static class ParkingSetup
@@ -49,10 +49,28 @@ public static class ParkingSetup
                     var db = ctx.HttpContext.RequestServices.GetRequiredService<ParkingDb>();
                     var name = ctx.Principal?.Identity?.Name;
                     var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Username == name && x.Active);
-                    if (user is null || !ctx.Principal!.IsInRole(user.Role)) { ctx.RejectPrincipal(); await ctx.HttpContext.SignOutAsync(); }
+                    // Deactivated, expired (GC-37) or re-roled accounts lose their session on the next request.
+                    if (user is null || !RoleCatalog.Usable(user, DateTime.UtcNow) || !ctx.Principal!.IsInRole(user.Role)) { ctx.RejectPrincipal(); await ctx.HttpContext.SignOutAsync(); }
                 };
             }).AddScheme<AuthenticationSchemeOptions, DeviceAuthentication>("Device", _ => { });
-        builder.Services.AddAuthorization(options => options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+        builder.Services.AddAuthorization(options => {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+            foreach (var permission in Perm.All) options.AddPolicy(permission, policy => policy.AddRequirements(new PermissionRequirement(permission)));
+            options.AddPolicy(Perm.AdminOnly, policy => policy.RequireRole(RoleCatalog.Admin));
+        });
+        builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddScoped<AreaScope>();
+        builder.Services.AddSingleton<ICameraAdapter, T1550Adapter>();
+        builder.Services.AddSingleton<ICameraAdapter, GenericAdapter>();
+        builder.Services.AddSingleton<ICameraAdapter, PpeAdapter>();
+        builder.Services.AddSingleton<PpeCache>();
+        builder.Services.AddSingleton<CameraAdapters>();
+        builder.Services.AddSingleton<InboxSignal>();
+        builder.Services.AddHostedService<CameraInboxWorker>();
+        builder.Services.AddHostedService<PresenceSyncWorker>();
+        builder.Services.AddSingleton<AutoOpenQueue>();
+        builder.Services.AddHostedService<AutoOpenWorker>();
         builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-Token");
         builder.Services.AddRateLimiter(options => {
             options.RejectionStatusCode = 429;
@@ -70,6 +88,8 @@ public static class ParkingSetup
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ParkingDb>();
         await db.Database.MigrateAsync();
+        await RoleCatalog.Seed(db);
+        await db.SaveChangesAsync();
         if (!await db.Users.AnyAsync())
         {
             var password = app.Configuration["Parking:BootstrapPassword"];
@@ -80,6 +100,9 @@ public static class ParkingSetup
             db.Users.Add(user);
         }
         if (!await db.Lanes.AnyAsync()) db.Lanes.AddRange(new Lane(), new Lane { Id = "exit-1", Direction = "Exit" });
+        await db.SaveChangesAsync();
+        await AreaCatalog.EnsureDefault(db);
+        if (!await db.SiteSettings.AnyAsync()) db.SiteSettings.Add(new SiteSettings());
         // A command left Pending across a process crash has an unknown physical outcome; never replay it.
         foreach (var command in await db.Commands.Where(x => x.Status == "Pending").ToListAsync()) command.Status = "Unknown";
         await db.SaveChangesAsync();
@@ -89,9 +112,14 @@ public static class ParkingSetup
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseRateLimiter();
+        var receiverPort = app.Configuration.GetValue<int?>("Receiver:Port");
         app.Use(async (context, next) => {
+            // The camera receiver port serves exactly one thing: POST /api from allow-listed cameras (CR-007).
+            var onReceiverPort = receiverPort is not null && context.Connection.LocalPort == receiverPort;
+            if (onReceiverPort && !(HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Equals("/api"))) { context.Response.StatusCode = 404; return; }
+            if (onReceiverPort || context.Request.Path.StartsWithSegments("/api/v1/parking/receiver")) { await next(); return; }
             if (context.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method)
-                && !context.Request.Path.StartsWithSegments("/api/v1/parking/device"))
+                && !context.Request.Path.StartsWithSegments("/api/v1/parking/device") && !context.Request.Path.StartsWithSegments("/api/v1/parking/sync"))
             {
                 try { await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context); }
                 catch (AntiforgeryValidationException) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { message = "Invalid CSRF token. Reload and sign in again." }); return; }

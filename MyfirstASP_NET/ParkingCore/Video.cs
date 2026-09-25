@@ -27,6 +27,16 @@ public class Camera
     public bool Enabled { get; set; } = true;
     public bool Record24x7 { get; set; } = true;
     public DateTime? LastSegmentUtc { get; set; }
+    // Third-party AI camera mapping (CR-007): device ID (MAC without separators) + channel → this camera → its lane.
+    [MaxLength(40)] public string? ExternalDevice { get; set; }
+    [MaxLength(20)] public string? ExternalChannel { get; set; }
+    // Confidence given to this device's results after field evaluation; null = results always go to guard review.
+    public double? TrustedConfidence { get; set; }
+    public DateTime? LastMessageUtc { get; set; }
+    // Video wall: a lighter sub-stream, if the camera has one (encrypted like the main source).
+    public string? WallSourceProtected { get; set; }
+    // GC-27: alert when an AI device sends nothing (not even its periodic alarm/heartbeat message) for this long. Null = off.
+    public int? SilentAlertSeconds { get; set; }
 }
 public class VideoSegment
 {
@@ -96,6 +106,9 @@ public interface IObjectStorage
     Task PutAsync(string key, Stream content, string contentType, IDictionary<string, string> metadata, CancellationToken cancellation);
     Task<long?> SizeAsync(string key, CancellationToken cancellation);
     string? ReadUrl(string key, TimeSpan validFor);
+    // Keys under a prefix, in ordinal order, strictly after startAfter.
+    Task<IReadOnlyList<string>> ListAsync(string prefix, string? startAfter, int max, CancellationToken cancellation);
+    Task<Stream?> GetAsync(string key, CancellationToken cancellation);
 }
 public sealed class FolderObjectStorage(string root) : IObjectStorage
 {
@@ -119,6 +132,21 @@ public sealed class FolderObjectStorage(string root) : IObjectStorage
         return Task.FromResult(file.Exists ? file.Length : (long?)null);
     }
     public string? ReadUrl(string key, TimeSpan validFor) => null;
+    public Task<IReadOnlyList<string>> ListAsync(string prefix, string? startAfter, int max, CancellationToken cancellation)
+    {
+        var start = Path.GetFullPath(root);
+        if (!Directory.Exists(start)) return Task.FromResult<IReadOnlyList<string>>([]);
+        var keys = Directory.EnumerateFiles(start, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith(".partial"))
+            .Select(f => Path.GetRelativePath(start, f).Replace(Path.DirectorySeparatorChar, '/'))
+            .Where(k => k.StartsWith(prefix, StringComparison.Ordinal) && (startAfter is null || string.CompareOrdinal(k, startAfter) > 0))
+            .OrderBy(k => k, StringComparer.Ordinal).Take(max).ToList();
+        return Task.FromResult<IReadOnlyList<string>>(keys);
+    }
+    public Task<Stream?> GetAsync(string key, CancellationToken cancellation)
+    {
+        var path = PathFor(key);
+        return Task.FromResult<Stream?>(File.Exists(path) ? File.OpenRead(path) : null);
+    }
 }
 public sealed class S3ObjectStorage : IObjectStorage
 {
@@ -147,6 +175,22 @@ public sealed class S3ObjectStorage : IObjectStorage
         try { return (await client.GetObjectMetadataAsync(bucket, key, cancellation)).ContentLength; }
         catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound) { return null; }
     }
+    public async Task<IReadOnlyList<string>> ListAsync(string prefix, string? startAfter, int max, CancellationToken cancellation)
+    {
+        var response = await client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = bucket, Prefix = prefix, StartAfter = startAfter, MaxKeys = max }, cancellation);
+        return (response.S3Objects ?? []).Select(x => x.Key).ToList();
+    }
+    public async Task<Stream?> GetAsync(string key, CancellationToken cancellation)
+    {
+        try
+        {
+            using var response = await client.GetObjectAsync(bucket, key, cancellation);
+            var copy = new MemoryStream();
+            await response.ResponseStream.CopyToAsync(copy, cancellation);
+            copy.Position = 0; return copy;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound) { return null; }
+    }
     public string? ReadUrl(string key, TimeSpan validFor) =>
         client.GetPreSignedURL(new GetPreSignedUrlRequest { BucketName = bucket, Key = key, Verb = HttpVerb.GET, Expires = DateTime.UtcNow.Add(validFor), Protocol = https ? Protocol.HTTPS : Protocol.HTTP });
 }
@@ -166,6 +210,7 @@ public sealed class SyncOutboxInterceptor : SaveChangesInterceptor
             DeviceCommand c => new SyncOutboxItem { EntityType = nameof(DeviceCommand), EntityId = c.Id.ToString(), Payload = JsonSerializer.Serialize(c, Json) },
             ParkingSession s => new SyncOutboxItem { EntityType = nameof(ParkingSession), EntityId = s.Id.ToString(), Payload = JsonSerializer.Serialize(s, Json) },
             ParkingAlert a => new SyncOutboxItem { EntityType = nameof(ParkingAlert), EntityId = a.Id.ToString(), Payload = JsonSerializer.Serialize(a, Json) },
+            PresenceRecord p when x.State == EntityState.Added => new SyncOutboxItem { EntityType = nameof(PresenceRecord), EntityId = p.EventId.ToString(), Payload = JsonSerializer.Serialize(p, Json) },
             _ => null
         }).OfType<SyncOutboxItem>().ToList();
         db.Outbox.AddRange(items);
@@ -292,7 +337,7 @@ public sealed class VideoRecorderSupervisor(IServiceScopeFactory scopes, IConfig
                 StopProcess(recording); recording.NextStartUtc = now;
             }
             else if (camera.LastSegmentUtc > now.AddSeconds(-options.SegmentSeconds * 3))
-                foreach (var alert in await db.Alerts.Where(x => x.Reason == "CAMERA_NOT_RECORDING:" + camera.Id && !x.Resolved).ToListAsync(stop)) { alert.Resolved = true; alert.ResolvedBy = "video-recorder"; }
+                foreach (var alert in await db.Alerts.Where(x => x.Reason == "CAMERA_NOT_RECORDING:" + camera.Id && !x.Resolved).ToListAsync(stop)) AlertLifecycle.AutoResolve(alert, "video-recorder", "Recording resumed.");
         }
         await db.SaveChangesAsync(stop);
         await EnforceQuota(db, options, root, cloudEnabled, stop);
@@ -459,7 +504,11 @@ public sealed class CloudUploader(IServiceScopeFactory scopes, IConfiguration co
             try
             {
                 using var json = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(item.Payload));
-                await storage.PutAsync($"{cloud.SiteId}/records/{item.EntityType}/{item.EntityId}/{item.Id:D12}.json", json, "application/json", new Dictionary<string, string>(), stop);
+                // Presence keys sort by upload time, so other stations can read them incrementally (PresenceSyncWorker).
+                var recordKey = item.EntityType == nameof(PresenceRecord)
+                    ? $"{cloud.SiteId}/presence/{now:yyyy/MM/dd/HHmmssfff}-{item.Id:D12}-{item.EntityId}.json"
+                    : $"{cloud.SiteId}/records/{item.EntityType}/{item.EntityId}/{item.Id:D12}.json";
+                await storage.PutAsync(recordKey, json, "application/json", new Dictionary<string, string>(), stop);
                 if (item.EvidenceId is not null)
                 {
                     var name = Path.GetFileName(item.EvidenceId);
