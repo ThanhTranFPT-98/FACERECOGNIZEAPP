@@ -10,8 +10,10 @@ import {
 } from '@ant-design/icons'
 import { Line, Column } from '@ant-design/charts'
 import { dashboardApi } from '../../services/api'
+import { useThemeMode } from '../../contexts/ThemeContext'
 
 const Dashboard = () => {
+  const { mode } = useThemeMode()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -78,10 +80,11 @@ const Dashboard = () => {
     smooth: true,
     area: {
       style: {
-        fill: 'l(270) 0:#ffffff 0.5:#7ec2f3 1:#1890ff',
+        fill: 'l(270) 0:rgba(56,189,248,0) 1:#38bdf8',
       },
     },
     height: 250,
+    theme: mode === 'light' ? 'classic' : 'classicDark',
   }
 
   if (loading) {
@@ -113,7 +116,7 @@ const Dashboard = () => {
               title="Total Employees"
               value={stats?.totalEmployees || 0}
               prefix={<TeamOutlined />}
-              valueStyle={{ color: '#1890ff' }}
+              valueStyle={{ color: 'var(--accent)' }}
             />
           </Card>
         </Col>
@@ -123,7 +126,7 @@ const Dashboard = () => {
               title="Strangers Today"
               value={stats?.strangersToday || 0}
               prefix={<UserAddOutlined />}
-              valueStyle={{ color: '#fa8c16' }}
+              valueStyle={{ color: 'var(--warning)' }}
             />
           </Card>
         </Col>
@@ -133,15 +136,15 @@ const Dashboard = () => {
               title="Access Logs Today"
               value={stats?.accessLogsToday || 0}
               prefix={<FileTextOutlined />}
-              valueStyle={{ color: '#52c41a' }}
+              valueStyle={{ color: 'var(--success)' }}
             />
             <div style={{ marginTop: 8 }}>
               {accessChange >= 0 ? (
-                <span style={{ color: '#52c41a' }}>
+                <span style={{ color: 'var(--success)' }}>
                   <ArrowUpOutlined /> {accessChangePercent}% vs yesterday
                 </span>
               ) : (
-                <span style={{ color: '#ff4d4f' }}>
+                <span style={{ color: 'var(--danger)' }}>
                   <ArrowDownOutlined /> {Math.abs(accessChangePercent)}% vs yesterday
                 </span>
               )}
@@ -154,7 +157,7 @@ const Dashboard = () => {
               title="Recent Alerts"
               value={stats?.recentAlerts?.length || 0}
               prefix={<BellOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
+              valueStyle={{ color: 'var(--danger)' }}
             />
           </Card>
         </Col>

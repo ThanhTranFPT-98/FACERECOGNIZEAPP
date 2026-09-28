@@ -225,7 +225,7 @@ export default function Parking() {
       <Space wrap>{t('Group by')} <Select value={groupBy} onChange={setGroupBy} style={{ minWidth: 140 }} options={[['day', 'Day'], ['month', 'Month'], ['year', 'Year'], ['hour', 'Hour of day (parking)'], ['shift', 'Shift (mine)'], ['lane', 'Lane']].map(([value, label]) => ({ value, label: t(label) }))} />
         <Button onClick={runStats}>{t('Show statistics')}</Button>{stats?.truncated && <Tag color="orange">first 100,000 events only</Tag>}</Space>
       {stats && <Table rowKey="bucket" size="small" pagination={false} style={{ marginTop: 12 }} dataSource={stats.rows} scroll={{ x: true }} columns={[
-        { title: stats.groupBy, dataIndex: 'bucket' }, { title: t('Events'), dataIndex: 'events', render: v => <Space><div style={{ width: 120 * v / maxBar, height: 10, background: '#1677ff', borderRadius: 2 }} />{v}</Space> },
+        { title: stats.groupBy, dataIndex: 'bucket' }, { title: t('Events'), dataIndex: 'events', render: v => <Space><div style={{ width: 120 * v / maxBar, height: 10, background: 'var(--accent)', borderRadius: 2 }} />{v}</Space> },
         ...cols(['allow', 'deny', 'review', 'guardApproved', 'entries', 'exits'])]} />}</Card>}
     {can('ViewAudit') && <><Button onClick={async () => { try { setAudit((await api.get(base + '/audit')).data) } catch { message.error(t('Audit unavailable')) } }}>{t('Latest audit')}</Button>{table(audit, cols(['id', 'actor', 'action', 'target', 'createdUtc']))}</>}</>
   const [personForm] = Form.useForm()
@@ -257,7 +257,7 @@ export default function Parking() {
     try { await api.post(base + '/events/' + photoFor.event.id + '/photos/camera'); message.success(t('Photo saved')); openPhotos(photoFor.event) }
     catch (err) { message.error(t(err.response?.data?.message || 'Camera photo failed')) }
   }
-  const img = (src, label) => <div style={{ flex: '1 1 240px' }}><Typography.Text type="secondary">{label}</Typography.Text><img alt={label} src={src} style={{ width: '100%', borderRadius: 6, border: '1px solid #ddd' }} /></div>
+  const img = (src, label) => <div style={{ flex: '1 1 240px' }}><Typography.Text type="secondary">{label}</Typography.Text><img alt={label} src={src} style={{ width: '100%', borderRadius: 6, border: '1px solid var(--border)' }} /></div>
   const photoModal = <Modal title={t('Photos') + ' · ' + (photoFor?.event.plate || photoFor?.event.personId || '') + ' · ' + (photoFor?.event.laneId || '')} open={!!photoFor} onCancel={() => setPhotoFor(null)} footer={null} width={960} destroyOnClose>
     {photoFor?.entry && (photoFor.entry.found ? <><Typography.Title level={5}>{t('Entry vs exit')}</Typography.Title><Space align="start" wrap style={{ width: '100%' }}>
         {photoFor.entry.entryAllowed && photoFor.entry.entry.evidenceId && img('/api' + base + '/events/' + photoFor.entry.entry.id + '/evidence', t('Entry') + ' · ' + photoFor.entry.entry.laneId + ' · ' + photoFor.entry.entry.createdUtc)}
@@ -301,10 +301,10 @@ export default function Parking() {
     {wall && !wall.gatewayUrl && <Alert type="warning" showIcon message={t('No stream gateway configured. Install MediaMTX on the station, load the downloaded mediamtx.yml, and set Video__GatewayUrl (e.g. http://station:8889).')} />}
     {wall?.groups.map(g => <Card key={g.area} size="small" title={g.area} style={{ marginBottom: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + Math.sqrt(wallSize) + ', minmax(0, 1fr))', gap: 8 }}>
-        {g.cameras.slice(0, wallSize).map(c => <div key={c.id} style={{ border: '3px solid ' + (laneAlert(c.laneId) ? '#ff4d4f' : 'transparent'), borderRadius: 6 }}>
+        {g.cameras.slice(0, wallSize).map(c => <div key={c.id} style={{ border: '3px solid ' + (laneAlert(c.laneId) ? 'var(--danger)' : 'transparent'), borderRadius: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><span>{c.name} · {c.laneId || '—'}</span><Tag color={c.recording ? 'green' : 'default'}>{t(c.recording ? 'recording' : 'not recording')}</Tag></div>
-          {wall.gatewayUrl ? <iframe title={c.id} src={wall.gatewayUrl.replace(/\/$/, '') + '/' + c.id + '/'} style={{ width: '100%', aspectRatio: '16 / 9', border: 0, background: '#000' }} allow="autoplay; fullscreen" /> :
-            <div style={{ aspectRatio: '16 / 9', background: '#111' }} />}</div>)}</div></Card>)}</>
+          {wall.gatewayUrl ? <iframe title={c.id} src={wall.gatewayUrl.replace(/\/$/, '') + '/' + c.id + '/'} style={{ width: '100%', aspectRatio: '16 / 9', border: 0, background: 'var(--video-bg)' }} allow="autoplay; fullscreen" /> :
+            <div style={{ aspectRatio: '16 / 9', background: 'var(--video-bg)' }} />}</div>)}</div></Card>)}</>
   const saveThen = form => async (path, values, method = 'put') => { if (await request(path, values, method)) form.resetFields() }
   const areasTab = <><Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('Area → Location → Lane. Move lanes between locations in Lane settings. An area or location can only be deleted when it is empty.')} />
     <Space align="start" wrap size="large">

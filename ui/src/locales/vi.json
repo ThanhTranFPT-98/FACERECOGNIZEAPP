@@ -95,6 +95,8 @@
  "Password": "Mật khẩu",
  "Password (12+ characters)": "Mật khẩu (từ 12 ký tự)",
  "Language": "Ngôn ngữ",
+ "Light theme": "Giao diện sáng",
+ "Dark theme": "Giao diện tối",
  "Too many attempts. Wait one minute.": "Thử quá nhiều lần. Vui lòng chờ 1 phút.",
  "Unable to sign in. Check the API and credentials.": "Không đăng nhập được. Kiểm tra máy chủ và tài khoản.",
  "API unavailable. Start the backend before signing in.": "Không kết nối được máy chủ. Hãy bật máy chủ trước khi đăng nhập.",

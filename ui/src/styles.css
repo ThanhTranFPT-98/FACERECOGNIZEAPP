@@ -1,0 +1,107 @@
+/* DSA brand tokens — mirrored from DSA Vision Platform (dark default + light).
+   Keep in sync with src/theme.js. Pages use these vars for inline colours. */
+:root {
+  color-scheme: dark;
+  --bg-base: #061426;
+  --bg-surface: #0c1e33;
+  --bg-nav: #040f1d;
+  --bg-hover: #12283f;
+  --bg-raised: #16304a;
+  --border: #273141;
+  --border-sub: #1a212c;
+  --fg: #e6edf3;
+  --fg-muted: #8b949e;
+  --fg-strong: #f0f6fc;
+  --accent: #38bdf8;
+  --accent-2: #f5b13d;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+  --video-bg: #010409;
+  --bg-sheen:
+    radial-gradient(1200px 620px at 12% -8%, rgba(56, 132, 214, .22), transparent 62%),
+    radial-gradient(980px 560px at 88% 108%, rgba(10, 32, 58, .60), transparent 60%);
+}
+
+/* Light theme — platform's [data-theme="light"] values. */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-base: #f6f8fa;
+  --bg-surface: #ffffff;
+  --bg-nav: #f0f3f6;
+  --bg-hover: #eaeef2;
+  --bg-raised: #e8ebee;
+  --border: #d0d7de;
+  --border-sub: #e7eaee;
+  --fg: #1f2328;
+  --fg-muted: #57606a;
+  --fg-strong: #1a1f24;
+  --accent: #0e7490;
+  --accent-2: #b45309;
+  --success: #1a7f37;
+  --danger: #cf222e;
+  --warning: #9a6700;
+  --video-bg: #1f2328;
+  --bg-sheen: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg-sheen), var(--bg-base);
+  background-attachment: fixed;
+  color: var(--fg);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* ── Brand mark (same treatment as the platform's .brandMark) ── */
+.dsaBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 64px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-sub);
+  overflow: hidden;
+}
+.dsaBrand.collapsed { justify-content: center; padding: 0 8px; }
+
+.dsaBrand img {
+  width: 76px;
+  height: 40px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  box-sizing: border-box;
+  padding: 3px 5px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: 9px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.09), rgba(37, 99, 235, 0.05));
+  filter: brightness(1.04) contrast(1.08) drop-shadow(0 0 5px rgba(56, 189, 248, 0.2));
+  box-shadow: 0 2px 10px rgba(2, 8, 23, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+/* The logo is white, so on light surfaces it sits on a navy plate (as in the platform). */
+[data-theme="light"] .dsaBrand img {
+  border-color: rgba(30, 64, 175, 0.32);
+  background: linear-gradient(135deg, #0f2748, #173b6c);
+  filter: contrast(1.12) drop-shadow(0 2px 5px rgba(15, 39, 72, 0.25));
+}
+.dsaBrand.collapsed img { width: 60px; height: 32px; }
+
+.dsaBrand strong { display: block; font-size: .95rem; color: var(--fg-strong); white-space: nowrap; }
+.dsaBrand small { display: block; font-size: .68rem; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+
+/* ── Sign-in screen ── */
+.dsaLogin { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.dsaLogin .ant-card {
+  width: 100%;
+  max-width: 420px;
+  background: linear-gradient(145deg, rgba(18, 48, 82, .58), rgba(6, 20, 39, .48));
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: inset 0 1px rgba(147, 210, 255, .16), 0 14px 34px rgba(0, 8, 22, .28);
+}
+[data-theme="light"] .dsaLogin .ant-card {
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 12px 32px rgba(31, 35, 40, 0.16);
+}
+.dsaLogin .dsaBrand { height: auto; padding: 0 0 16px; margin-bottom: 20px; }
+.dsaLogin .dsaBrand strong { font-size: 1.4rem; }

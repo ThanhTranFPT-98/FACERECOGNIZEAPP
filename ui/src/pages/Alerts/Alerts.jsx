@@ -172,7 +172,7 @@ const Alerts = () => {
               title="Alerts Today"
               value={stats.alertsToday}
               prefix={<BellOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
+              valueStyle={{ color: 'var(--danger)' }}
             />
           </Card>
         </Col>
@@ -181,7 +181,7 @@ const Alerts = () => {
             <Statistic
               title="Alerts Yesterday"
               value={stats.alertsYesterday}
-              valueStyle={{ color: '#fa8c16' }}
+              valueStyle={{ color: 'var(--warning)' }}
             />
           </Card>
         </Col>
@@ -190,7 +190,7 @@ const Alerts = () => {
             <Statistic
               title="Total Unresolved"
               value={stats.totalUnresolved}
-              valueStyle={{ color: '#1890ff' }}
+              valueStyle={{ color: 'var(--accent)' }}
             />
           </Card>
         </Col>

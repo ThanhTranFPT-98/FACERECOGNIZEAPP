@@ -292,7 +292,7 @@ const Monitor = () => {
                 <div style={{
                   width: resolution.width,
                   height: resolution.height,
-                  background: '#f0f0f0',
+                  background: 'var(--bg-raised)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -307,7 +307,7 @@ const Monitor = () => {
                   key={idx}
                   style={{
                     position: 'absolute',
-                    border: `2px solid ${face.type === 'recognized' ? '#52c41a' : '#ff4d4f'}`,
+                    border: `2px solid ${face.type === 'recognized' ? 'var(--success)' : 'var(--danger)'}`,
                     borderRadius: 4,
                     padding: '2px 8px',
                     background: 'rgba(0,0,0,0.6)',
@@ -338,14 +338,14 @@ const Monitor = () => {
               <Statistic
                 title="Recognized"
                 value={stats.recognized}
-                valueStyle={{ color: '#52c41a', fontSize: 20 }}
+                valueStyle={{ color: 'var(--success)', fontSize: 20 }}
               />
             </div>
             <div style={{ marginTop: 16 }}>
               <Statistic
                 title="Strangers"
                 value={stats.strangers}
-                valueStyle={{ color: '#ff4d4f', fontSize: 20 }}
+                valueStyle={{ color: 'var(--danger)', fontSize: 20 }}
               />
             </div>
           </Card>
@@ -355,7 +355,7 @@ const Monitor = () => {
               <Alert message="No faces detected" type="info" />
             ) : (
               faces.map((face, idx) => (
-                <div key={idx} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                <div key={idx} style={{ marginBottom: 8, padding: 8, background: 'var(--bg-hover)', borderRadius: 4 }}>
                   <Tag color={face.type === 'recognized' ? 'green' : 'red'}>
                     {face.type === 'recognized' ? 'Employee' : 'Stranger'}
                   </Tag>

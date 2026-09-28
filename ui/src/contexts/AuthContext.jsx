@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { Alert, Button, Card, Form, Input, Spin, Typography } from 'antd'
 import api from '../services/api'
 import { t } from '../i18n'
+import BrandMark from '../components/Brand/BrandMark'
 const AuthContext = createContext(null)
 export const useAuth = () => useContext(AuthContext)
 export function AuthProvider({ children }) {
@@ -23,8 +24,8 @@ export function AuthProvider({ children }) {
   }
   const logout = async () => { await api.post('/auth/logout'); setUser(null) }
   if (loading) return <Spin fullscreen />
-  if (!user) return <div style={{ minHeight: '100vh', background: '#f0f4f8', display: 'grid', placeItems: 'center', padding: 24 }}><Card style={{ width: '100%', maxWidth: 420 }}>
-    <Typography.Title level={2}>{t('Parking access')}</Typography.Title><Typography.Paragraph>{t('Sign in with your operator account.')}</Typography.Paragraph>
+  if (!user) return <div className="dsaLogin"><Card>
+    <BrandMark /><Typography.Paragraph type="secondary">{t('Sign in with your operator account.')}</Typography.Paragraph>
     {error && <Alert message={t(error)} type="error" style={{ marginBottom: 20 }} />}
     <Form layout="vertical" onFinish={login}>
       <Form.Item name="username" label={t('Username')} rules={[{ required: true }]}><Input autoComplete="username" /></Form.Item>

@@ -9,12 +9,16 @@ import {
   FileTextOutlined,
   BellOutlined,
   SettingOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSignalR } from '../../contexts/SignalRContext'
+import BrandMark from '../Brand/BrandMark'
+import { useThemeMode } from '../../contexts/ThemeContext'
 
 const { Header, Sider, Content } = Layout
-const { Title, Text } = Typography
+const { Text } = Typography
 import { t, getLang, setLang } from '../../i18n'
 
 const menuItems = [
@@ -62,6 +66,7 @@ const MainLayout = ({ children }) => {
   const navigate = useNavigate()
   const location = useLocation()
   const { isConnected, alerts } = useSignalR()
+  const { mode, toggle } = useThemeMode()
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken()
@@ -78,26 +83,15 @@ const MainLayout = ({ children }) => {
         trigger={null}
         collapsible
         collapsed={collapsed}
-        theme="light"
+        theme={mode}
+        width={244}
         style={{
-          boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
+          borderRight: '1px solid var(--border)',
         }}
       >
-        <div
-          style={{
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: '1px solid #f0f0f0',
-          }}
-        >
-          <Title level={collapsed ? 5 : 4} style={{ margin: 0, color: '#1890ff' }}>
-            {collapsed ? 'PA' : 'Parking Access'}
-          </Title>
-        </div>
+        <BrandMark collapsed={collapsed} />
         <Menu
-          theme="light"
+          theme={mode}
           mode="inline"
           selectedKeys={[currentMenuKey]}
           items={menuItems.filter(item => user.role === 'Admin' || item.key === '/parking').map(item => ({
@@ -109,18 +103,18 @@ const MainLayout = ({ children }) => {
             ) : item.label,
           }))}
           onClick={handleMenuClick}
-          style={{ borderRight: 0 }}
+          style={{ borderRight: 0, paddingTop: 8 }}
         />
       </Sider>
       <Layout>
         <Header
           style={{
             padding: '0 24px',
-            background: colorBgContainer,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            borderBottom: '1px solid var(--border)',
+            backdropFilter: 'blur(18px) saturate(140%)',
           }}
         >
           <Space>
@@ -129,7 +123,7 @@ const MainLayout = ({ children }) => {
                 width: 12,
                 height: 12,
                 borderRadius: '50%',
-                backgroundColor: isConnected ? '#52c41a' : '#ff4d4f',
+                backgroundColor: isConnected ? 'var(--success)' : 'var(--danger)',
               }}
             />
             <Text type="secondary">
@@ -140,8 +134,9 @@ const MainLayout = ({ children }) => {
             <Badge count={alerts.length}>
               <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
             </Badge>
-            <Avatar style={{ backgroundColor: '#1890ff' }}>A</Avatar>
+            <Avatar style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)' }}>{user.username?.[0]?.toUpperCase() || 'A'}</Avatar>
             <Text strong>{user.username} · {t(user.role)}</Text>
+            <Button size="small" icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />} onClick={toggle} title={t(mode === 'dark' ? 'Light theme' : 'Dark theme')} aria-label={t(mode === 'dark' ? 'Light theme' : 'Dark theme')} />
             <Button size="small" onClick={() => setLang(getLang() === 'vi' ? 'en' : 'vi')} title={t('Language')}>{getLang() === 'vi' ? 'EN' : 'VI'}</Button>
             <Button onClick={logout}>{t('Sign out')}</Button>
           </Space>
