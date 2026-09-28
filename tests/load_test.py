@@ -61,8 +61,8 @@ def main():
            'Parking__EnableLiveBarrier': 'true', 'Parking__BarrierUrl': f'http://127.0.0.1:{bridge.server_port}',
            'Parking__EvidenceDirectory': str(Path(temp.name) / 'evidence'), 'Receiver__Key': receiver_key, 'Logging__LogLevel__Default': 'Warning'}
     log = open(Path(temp.name) / 'api.log', 'w+', encoding='utf-8')
-    api = subprocess.Popen([os.environ.get('PARKING_DOTNET', 'dotnet'), str(ROOT / 'MyfirstASP_NET/bin/Debug/net8.0/MyfirstASP_NET.dll'), '--urls', base],
-                           cwd=ROOT / 'MyfirstASP_NET', env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    api = subprocess.Popen([os.environ.get('PARKING_DOTNET', 'dotnet'), str(ROOT / 'DSAVehicle/bin/Debug/net8.0/DSAVehicle.dll'), '--urls', base],
+                           cwd=ROOT / 'DSAVehicle', env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     jar = http.cookiejar.CookieJar(); client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
     def call(method, path, body=None, headers=None, use_client=True):
         headers = dict(headers or {})

@@ -2,9 +2,9 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using MyfirstASP_NET.Data;
-using MyfirstASP_NET.Models;
-using MyfirstASP_NET.ParkingCore;
+using DSAVehicle.Data;
+using DSAVehicle.Models;
+using DSAVehicle.ParkingCore;
 
 var count = 0;
 void Check(bool value, string label) { if (!value) throw new Exception(label); Console.WriteLine("PASS: " + label); count++; }

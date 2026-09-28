@@ -1,27 +1,27 @@
 @echo off
 chcp 65001 >nul
 echo ==========================================
-echo Face Recognition App - Startup Script
+echo DSA Vehicle - Startup Script
 echo ==========================================
 echo.
 
 :: Start Backend (ASP.NET)
 echo [1/3] Starting ASP.NET Backend...
-start "Backend" powershell -NoExit -Command "cd D:\Tran_Thanh\Self_learning\CSharp\FaceRecognizeApp\MyfirstASP_NET; dotnet run"
+start "Backend" powershell -NoExit -Command "cd '%~dp0DSAVehicle'; dotnet run"
 
 :: Wait for backend to start (needs time to compile + connect to SQL Server)
 timeout /t 20 /nobreak >nul
 
 :: Start Python AI Service
 echo [2/3] Starting Python AI Service...
-start "Python AI" powershell -NoExit -Command "cd D:\Tran_Thanh\Self_learning\CSharp\FaceRecognizeApp\AiService; .\face_detection_env\Scripts\Activate.ps1; $env:PYTHONPATH='.'; uvicorn app.main:app --host 0.0.0.0 --port 8000"
+start "Python AI" powershell -NoExit -Command "cd '%~dp0AiService'; .\face_detection_env\Scripts\Activate.ps1; $env:PYTHONPATH='.'; uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 :: Wait for Python to start (needs 30-60s to load models)
 timeout /t 15 /nobreak >nul
 
 :: Start React UI
 echo [3/3] Starting React UI...
-start "React UI" powershell -NoExit -Command "cd D:\Tran_Thanh\Self_learning\CSharp\FaceRecognizeApp\ui; npm run dev"
+start "React UI" powershell -NoExit -Command "cd '%~dp0ui'; npm run dev"
 
 echo.
 echo ==========================================

@@ -7,6 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <Compile Include="../../MyfirstASP_NET/Parking/ParkingSimulation.cs" Link="ParkingSimulation.cs" />
+    <Compile Include="../../DSAVehicle/Parking/ParkingSimulation.cs" Link="ParkingSimulation.cs" />
   </ItemGroup>
 </Project>

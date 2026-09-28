@@ -112,10 +112,10 @@ Khởi đầu có thể dùng bảng inbox trong database và worker nền, gi�
 
 | Thành phần | Thay đổi dự kiến |
 |---|---|
-| MyfirstASP_NET/ParkingCore/ParkingController.cs | Giữ API capture/capture-burst hiện có; thêm receiver đúng định dạng JSON hãng qua controller riêng |
-| MyfirstASP_NET/ParkingCore/ParkingService.cs | Tái sử dụng Observe và quy trình ra/vào; thêm đường nhận observation camera đã chuẩn hóa và kiểm tra độ mới/nguồn |
-| MyfirstASP_NET/ParkingCore/Domain.cs và migrations | Bổ sung CameraDevice, CameraInbox, CameraObservation, EvidenceAsset và ràng buộc chống xử lý trùng; tên cuối cùng chốt lúc thiết kế |
-| MyfirstASP_NET/ParkingCore/Security.cs, Setup.cs | Đăng ký worker/adapter và cơ chế xác thực tương thích camera, không làm yếu API thiết bị đang có |
+| DSAVehicle/ParkingCore/ParkingController.cs | Giữ API capture/capture-burst hiện có; thêm receiver đúng định dạng JSON hãng qua controller riêng |
+| DSAVehicle/ParkingCore/ParkingService.cs | Tái sử dụng Observe và quy trình ra/vào; thêm đường nhận observation camera đã chuẩn hóa và kiểm tra độ mới/nguồn |
+| DSAVehicle/ParkingCore/Domain.cs và migrations | Bổ sung CameraDevice, CameraInbox, CameraObservation, EvidenceAsset và ràng buộc chống xử lý trùng; tên cuối cùng chốt lúc thiết kế |
+| DSAVehicle/ParkingCore/Security.cs, Setup.cs | Đăng ký worker/adapter và cơ chế xác thực tương thích camera, không làm yếu API thiết bị đang có |
 | AiService/plate_service.py | Nhánh OCR dự phòng/đối chứng nếu được chọn; hiệu chuẩn mô hình với dữ liệu hiện trường |
 | ui/src/pages/Parking | Màn hình camera, trạng thái inbox, ảnh bằng chứng và duyệt kết quả |
 | tests và docs | Fixture đã loại dữ liệu không cần thiết, replay, kiểm thử lỗi, runbook camera và pilot |

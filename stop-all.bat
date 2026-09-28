@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ==========================================
-echo Face Recognition App - Stop All Services
+echo DSA Vehicle - Stop All Services
 echo ==========================================
 echo.
 
@@ -12,7 +12,7 @@ taskkill /F /IM python.exe 2>nul
 echo [1/3] Python AI Service stopped
 
 :: Kill ASP.NET Backend
-taskkill /F /IM MyfirstASP_NET.exe 2>nul
+taskkill /F /IM DSAVehicle.exe 2>nul
 taskkill /F /IM dotnet.exe 2>nul
 echo [2/3] ASP.NET Backend stopped
 

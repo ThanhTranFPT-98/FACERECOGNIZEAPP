@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../MyfirstASP_NET/MyfirstASP_NET.csproj" />
+    <ProjectReference Include="../../DSAVehicle/DSAVehicle.csproj" />
   </ItemGroup>
 </Project>

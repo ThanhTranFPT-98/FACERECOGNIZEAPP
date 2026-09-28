@@ -68,8 +68,8 @@ class ParkingIntegration(unittest.TestCase):
     def start(self):
         dotnet = os.environ.get('PARKING_DOTNET', 'dotnet')
         urls = ';'.join([self.base] + getattr(self, 'extra_urls', []))
-        self.process = subprocess.Popen([dotnet, str(ROOT / 'MyfirstASP_NET/bin/Debug/net8.0/MyfirstASP_NET.dll'), '--urls', urls],
-            cwd=ROOT / 'MyfirstASP_NET', env=self.env, stdout=self.log, stderr=subprocess.STDOUT,
+        self.process = subprocess.Popen([dotnet, str(ROOT / 'DSAVehicle/bin/Debug/net8.0/DSAVehicle.dll'), '--urls', urls],
+            cwd=ROOT / 'DSAVehicle', env=self.env, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         for _ in range(100):
             if self.process.poll() is not None:
@@ -543,8 +543,8 @@ class ParkingIntegration(unittest.TestCase):
             env = {**self.env, **station_b_env, 'ConnectionStrings__Parking': 'Data Source=' + str(Path(self.temp.name) / 'station-b.db'),
                    'Parking__EvidenceDirectory': str(Path(self.temp.name) / 'evidence-b')}
             log = open(Path(self.temp.name) / 'station-b.log', 'a+', encoding='utf-8')
-            p = subprocess.Popen([os.environ.get('PARKING_DOTNET', 'dotnet'), str(ROOT / 'MyfirstASP_NET/bin/Debug/net8.0/MyfirstASP_NET.dll'), '--urls', b_url],
-                cwd=ROOT / 'MyfirstASP_NET', env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            p = subprocess.Popen([os.environ.get('PARKING_DOTNET', 'dotnet'), str(ROOT / 'DSAVehicle/bin/Debug/net8.0/DSAVehicle.dll'), '--urls', b_url],
+                cwd=ROOT / 'DSAVehicle', env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             started.append((p, log))
             return p
         started = []

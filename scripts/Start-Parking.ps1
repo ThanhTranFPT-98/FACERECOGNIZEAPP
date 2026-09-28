@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$apiDirectory = Join-Path $projectRoot 'MyfirstASP_NET'
+$apiDirectory = Join-Path $projectRoot 'DSAVehicle'
 $logDirectory = Join-Path $apiDirectory 'App_Data'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 if ($Bootstrap) {
@@ -15,7 +15,7 @@ if ($Bootstrap) {
     if ($env:Parking__BootstrapPassword.Length -lt 12) { throw 'Use at least 12 characters.' }
 }
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
-& $DotnetPath build (Join-Path $apiDirectory 'MyfirstASP_NET.csproj') --nologo
+& $DotnetPath build (Join-Path $apiDirectory 'DSAVehicle.csproj') --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Backend build failed. Install the .NET 8 SDK.' }
 $api = Start-Process -FilePath $DotnetPath -ArgumentList 'run --no-build --urls http://localhost:5085' -WorkingDirectory $apiDirectory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'parking-api.log') -RedirectStandardError (Join-Path $logDirectory 'parking-api-error.log')
 $ocr = Start-Process -FilePath $PythonPath -ArgumentList '-m uvicorn plate_service:app --host 127.0.0.1 --port 8001' -WorkingDirectory (Join-Path $projectRoot 'AiService') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'parking-ocr.log') -RedirectStandardError (Join-Path $logDirectory 'parking-ocr-error.log')

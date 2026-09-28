@@ -23,7 +23,7 @@ backend_err.log
 ui.log
 
 # =========================
-# .NET / MyfirstASP_NET
+# .NET / DSAVehicle
 # =========================
 [Bb]in/
 [Oo]bj/
@@ -142,7 +142,7 @@ coverage.xml
 # Face dataset images & features (PII)
 AiService/datasets/
 AiService/assets/uploaded_images/
-MyfirstASP_NET/wwwroot/snapshots/
+DSAVehicle/wwwroot/snapshots/
 
 # Misc large/binary
 *.mp4

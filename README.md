@@ -1,4 +1,4 @@
-# Face Recognition System - FaceRecognizeApp
+# DSA Vehicle
 
 ## Parking access application
 
@@ -12,7 +12,7 @@ A real-time face recognition and management system consisting of a React fronten
 
 The project is divided into three main components:
 
-- **`MyfirstASP_NET`**: ASP.NET Core Web API backend.
+- **`DSAVehicle`**: ASP.NET Core Web API backend.
   - Handles business logic, employee/stranger management, and access logs.
   - Integrates with SQL Server for data persistence.
   - Uses SignalR for real-time notifications to the frontend.
@@ -66,7 +66,7 @@ pip install -r requirements.txt
 The ASP.NET backend uses SQL Server. Configure your connection string using `dotnet user-secrets`:
 
 ```powershell
-cd MyfirstASP_NET
+cd DSAVehicle
 dotnet user-secrets init
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Data Source=YOUR_SERVER;Initial Catalog=FaceRecognitionDB;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;"
 dotnet ef database update

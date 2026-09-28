@@ -22,7 +22,7 @@ The script prompts for the initial admin password and starts services in hidden 
 
 During this development session, a temporary SDK was installed under `%TEMP%\parking-dotnet-sdk\sdk`. If it is still present, the launcher accepts `-DotnetPath "$env:TEMP\parking-dotnet-sdk\sdk\dotnet.exe"`. Install a normal SDK for ongoing work; the temporary directory is not a permanent dependency.
 
-Manual backend startup from `MyfirstASP_NET`:
+Manual backend startup from `DSAVehicle`:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
@@ -33,7 +33,7 @@ dotnet run --urls http://localhost:5085
 Manual OCR startup from `AiService`: `python -m uvicorn plate_service:app --host 127.0.0.1 --port 8001`.
 Manual UI startup from `ui`: `npm run dev`.
 
-The app creates a persistent local SQLite parking database at `MyfirstASP_NET/App_Data/parking.db` and seeds two shadow/simulated lanes. It does not overwrite or migrate the original face SQL Server database. Parking records and original employee/face records are separate bounded areas.
+The app creates a persistent local SQLite parking database at `DSAVehicle/App_Data/parking.db` and seeds two shadow/simulated lanes. It does not overwrite or migrate the original face SQL Server database. Parking records and original employee/face records are separate bounded areas.
 
 ## Demo flow
 

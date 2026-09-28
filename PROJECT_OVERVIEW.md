@@ -2,7 +2,7 @@
 
 | Item | Value |
 | --- | --- |
-| Project | DSA Demo Bot Barrier App (repo: `FACERECOGNIZEAPP`) |
+| Project | DSA Vehicle (repo: `DSA_Vehicle`) |
 | Document type | System overview + bug log + change-request log |
 | Last reviewed | 2026-09-24 (from source code, not from memory) |
 | Owner | ThanhTranFPT-98 |
@@ -318,15 +318,15 @@ AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane
 | Component | Path | Tech | Port | Notes |
 | --- | --- | --- | --- | --- |
 | Web UI | `ui/` | React 18, Vite 8, Ant Design, axios, SignalR | 5173 | Vite proxies `/api`, `/parkingHub`, `/notificationHub` to 5085 |
-| API | `MyfirstASP_NET/` | ASP.NET Core 8, EF Core, SignalR | 5085 | Entry: `Program.cs` → `builder.AddParking()` in `ParkingCore/Setup.cs` |
-| Parking core | `MyfirstASP_NET/ParkingCore/` | C# | — | All parking logic lives here |
-| Old simulation | `MyfirstASP_NET/Parking/ParkingSimulation.cs` | C# | — | In-memory demo, kept only for its tests |
-| Legacy face backend | `MyfirstASP_NET/Controllers`, `Services`, `Repository`, `Models` | C# + SQL Server | — | Employees/strangers/access logs. Admin only |
+| API | `DSAVehicle/` | ASP.NET Core 8, EF Core, SignalR | 5085 | Entry: `Program.cs` → `builder.AddParking()` in `ParkingCore/Setup.cs` |
+| Parking core | `DSAVehicle/ParkingCore/` | C# | — | All parking logic lives here |
+| Old simulation | `DSAVehicle/Parking/ParkingSimulation.cs` | C# | — | In-memory demo, kept only for its tests |
+| Legacy face backend | `DSAVehicle/Controllers`, `Services`, `Repository`, `Models` | C# + SQL Server | — | Employees/strangers/access logs. Admin only |
 | Plate OCR | `AiService/plate_service.py` | FastAPI, OpenCV, Tesseract | 8001 | Baseline, **uncalibrated** (`calibrated: false`) |
 | Face AI | `AiService/app/main.py` | FastAPI, PyTorch, SCRFD, ArcFace | 8000 | Needs model weights (not in repo) |
 | Lane worker | `AiService/lane_worker.py` | Python, OpenCV, requests | — | Sends 2–3 frame bursts per interval |
 | Plate evaluation | `AiService/evaluate_plates.py` | Python | — | Measures OCR accuracy on a labelled manifest |
-| Video + cloud sync (CR-001) | `MyfirstASP_NET/ParkingCore/Video.cs`, `VideoController.cs` | C# BackgroundServices + ffmpeg + AWSSDK.S3 | — | 24/7 recorder, ring buffer, outbox, uploader. Off by default (`Video:Enabled`, `Cloud:Enabled`) |
+| Video + cloud sync (CR-001) | `DSAVehicle/ParkingCore/Video.cs`, `VideoController.cs` | C# BackgroundServices + ffmpeg + AWSSDK.S3 | — | 24/7 recorder, ring buffer, outbox, uploader. Off by default (`Video:Enabled`, `Cloud:Enabled`) |
 | Backup | `scripts/backup_sqlite.py` | Python | — | Online SQLite backup |
 | Launcher | `scripts/Start-Parking.ps1` | PowerShell | — | Use this one (not `start-all.bat`) |
 | Tests | `tests/` | C# console tests + Python | — | See section 14 |
@@ -592,14 +592,14 @@ Site timings (CR-003, stored in the database, not in config): decision valid 30 
 ### Run (local, simulation)
 
 ```powershell
-# from FACERECOGNIZEAPP
+# from the repo root
 cd ui; npm ci; cd ..
 python -m pip install -r AiService/requirements-plate.txt   # + install Tesseract
 .\scripts\Start-Parking.ps1 -Bootstrap                       # first time only; asks admin password
 # open http://localhost:5173/parking  (user: admin)
 ```
 
-Logs: `MyfirstASP_NET/App_Data/parking-api*.log`, `parking-ocr*.log`. Demo flow: `docs/DEPLOYMENT.md` → "Demo flow".
+Logs: `DSAVehicle/App_Data/parking-api*.log`, `parking-ocr*.log`. Demo flow: `docs/DEPLOYMENT.md` → "Demo flow".
 
 ### Tests
 
@@ -695,7 +695,7 @@ python tests/i18n_check.py                   # every UI text has a Vietnamese en
 
 ### BUG-001 — Entire parking subsystem is untracked in git
 - **Date found:** 2026-09-24 · **Found by:** agent code review
-- **Area / files:** `MyfirstASP_NET/ParkingCore/`, `MyfirstASP_NET/Parking/`, `AiService/plate_service.py`, `lane_worker.py`, `evaluate_plates.py`, `ui/src/pages/Parking/`, `ui/src/contexts/AuthContext.jsx`, `docs/`, `scripts/`, `tests/`, `PARKING_IMPLEMENTATION.md`. Tracked files such as `Program.cs` also have uncommitted edits.
+- **Area / files:** `DSAVehicle/ParkingCore/`, `DSAVehicle/Parking/`, `AiService/plate_service.py`, `lane_worker.py`, `evaluate_plates.py`, `ui/src/pages/Parking/`, `ui/src/contexts/AuthContext.jsx`, `docs/`, `scripts/`, `tests/`, `PARKING_IMPLEMENTATION.md`. Tracked files such as `Program.cs` also have uncommitted edits.
 - **Severity:** Critical · **Status:** Fixed locally 2026-09-24 — commit `fba0729` on branch `feature/parking-access`. **Not pushed** to the remote yet, so still no off-machine backup.
 - **Symptom:** `git status` shows these paths as `??`. Git history has only 2 commits, both from the original face app.
 - **Root cause:** Work was done but never committed.
@@ -733,7 +733,7 @@ python tests/i18n_check.py                   # every UI text has a Vietnamese en
 - **Fix:** Obtain `arcface_r50.pth` and `scrfd_2.5g_bnkps.onnx` (see `README.md`). Check the licences.
 
 ### BUG-006 — Invalid webhook URL throws on every maintenance tick
-- **Area / files:** `MyfirstASP_NET/ParkingCore/Maintenance.cs:51-53`
+- **Area / files:** `DSAVehicle/ParkingCore/Maintenance.cs:51-53`
 - **Severity:** Low · **Status:** Open (found by code reading, not reproduced)
 - **Symptom (expected):** If `Parking__AlertWebhookUrl` is set to an `http://` URL, "Parking maintenance failed … Alert webhook must use HTTPS" is logged every 15 s. Offline/retention work before it still runs.
 - **Fix idea:** Validate at startup and fail fast, or log once.
