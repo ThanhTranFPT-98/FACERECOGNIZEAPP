@@ -80,7 +80,6 @@
  "UPLOAD_BACKLOG": "Tồn đọng tải lên",
  "VIDEO_DISK_FULL": "Ổ ghi hình đầy",
  "CLOCK_DRIFT": "Lệch giờ hệ thống",
-
  "Parking access": "Kiểm soát ra vào",
  "Parking Access": "Kiểm soát ra vào",
  "Vietnam parking access": "Kiểm soát ra vào",
@@ -107,7 +106,6 @@
  "Access Logs": "Nhật ký ra vào",
  "Alerts": "Cảnh báo",
  "Settings": "Cài đặt",
-
  "Lane monitor": "Giám sát làn",
  "Inside now": "Đang ở trong",
  "Vehicles": "Phương tiện",
@@ -120,7 +118,6 @@
  "Areas": "Khu vực",
  "Lane settings": "Cấu hình làn",
  "Operators & roles": "Tài khoản & vai trò",
-
  "Required": "Bắt buộc",
  "Yes": "Có",
  "No": "Không",
@@ -185,7 +182,6 @@
  "unknown plate": "không rõ biển số",
  "Entries": "Số lượt",
  "Events": "Sự kiện",
-
  "59-X1 123.45 or 30A-123.45": "59-X1 123.45 hoặc 30A-123.45",
  "Vietnamese plate": "Biển số",
  "Existing enrolled person ID (optional)": "Mã người đã đăng ký khuôn mặt (không bắt buộc)",
@@ -194,7 +190,6 @@
  "Registration valid until (optional)": "Đăng ký có hiệu lực đến (không bắt buộc)",
  "Save vehicle": "Lưu phương tiện",
  "Edit / drivers": "Sửa / người lái",
-
  "Walk-in: register an unknown vehicle for today (ends at the next day start)": "Khách vãng lai: đăng ký xe lạ trong hôm nay (hết hạn đầu ngày hôm sau)",
  "Driver / company": "Lái xe / đơn vị",
  "Register walk-in": "Đăng ký vãng lai",
@@ -205,7 +200,6 @@
  "Maximum entries": "Số lượt vào tối đa",
  "Pre-register / approve visitor": "Đăng ký trước / duyệt khách",
  "Revoke": "Thu hồi",
-
  "Shadow lanes record decisions without opening barriers. Camera results require a validated recognition model or guard review.": "Làn ở chế độ chạy thử chỉ ghi quyết định, không mở barrier. Kết quả camera cần mô hình đã được kiểm định hoặc bảo vệ duyệt.",
  "Simulated observation": "Quan sát mô phỏng",
  "Camera images": "Ảnh camera",
@@ -229,7 +223,6 @@
  "Review reason": "Lý do duyệt",
  "Approve": "Duyệt cho qua",
  "Mark reconciled": "Đánh dấu đã đối soát",
-
  "Site timing defaults (used by every lane without an override)": "Thời gian mặc định của site (áp dụng cho làn không cài riêng)",
  "Allow decision valid (s)": "Quyết định cho phép có hiệu lực (giây)",
  "Guard review window (s)": "Thời gian bảo vệ được duyệt (giây)",
@@ -263,7 +256,6 @@
  "Inspection photo required before opening": "Bắt buộc chụp ảnh kiểm tra trước khi mở",
  "Timing overrides (leave empty to use the site default)": "Thời gian riêng của làn (để trống = dùng mặc định của site)",
  "Save lane": "Lưu làn",
-
  "Camera ID": "Mã camera",
  "Lane (links events to this camera)": "Làn (gắn sự kiện với camera này)",
  "Stream URL (rtsp://user:password@ip/…) — leave empty to keep the saved one": "Địa chỉ luồng (rtsp://user:password@ip/…) — để trống để giữ địa chỉ đã lưu",
@@ -277,17 +269,14 @@
  "Refresh cameras": "Làm mới camera",
  "Video list unavailable": "Không tải được danh sách video",
  "No recording covers this event. Check that a camera is linked to the lane and was recording.": "Không có đoạn ghi hình cho sự kiện này. Kiểm tra camera đã gắn với làn và đang ghi hình.",
-
  "Acknowledge": "Tiếp nhận",
  "Resolve…": "Xử lý…",
  "Close alert": "Đóng cảnh báo",
  "What was checked / done (required)": "Đã kiểm tra / xử lý gì (bắt buộc)",
  "False alarm (counts toward AI tuning)": "Báo động giả (dùng để tinh chỉnh AI)",
-
  "Check services": "Kiểm tra dịch vụ",
  "Health check failed": "Kiểm tra dịch vụ không thành công",
  "AI camera inbox": "Hộp thư camera AI",
-
  "Reason contains": "Lý do có chứa",
  "Person ID": "Mã người",
  "Export Excel (5 sheets)": "Xuất Excel (5 sheet)",
@@ -303,12 +292,10 @@
  "Shift (mine)": "Ca (khu mỏ)",
  "Latest audit": "Nhật ký gần nhất",
  "Audit unavailable": "Không tải được nhật ký",
-
  "People allowed through person lanes (flap gates). Person ID = the ID the face terminal or face service reports.": "Danh sách người được qua làn người (cổng lật). Mã người = mã do máy chấm công khuôn mặt hoặc dịch vụ khuôn mặt gửi về.",
  "Employee code": "Mã nhân viên",
  "Access valid until (optional)": "Quyền vào có hiệu lực đến (không bắt buộc)",
  "Save person": "Lưu người",
-
  "Entry vs exit": "So sánh lượt vào và lượt ra",
  "No entry found for this plate. Check the vehicle before opening.": "Không tìm thấy lượt vào của biển số này. Kiểm tra xe trước khi mở cổng.",
  "Take from lane camera": "Chụp từ camera của làn",
@@ -316,7 +303,6 @@
  "Photos unavailable": "Không tải được ảnh",
  "Upload failed": "Tải ảnh lên không thành công",
  "Camera photo failed": "Chụp từ camera không thành công",
-
  "Inside for": "Ở trong được",
  "Close…": "Đóng…",
  "Why close this presence (e.g. left through an unmonitored gate)?": "Vì sao đóng lượt ở trong này (ví dụ đã ra qua cổng không giám sát)?",
@@ -325,10 +311,8 @@
  "End (HH:mm)": "Kết thúc (HH:mm)",
  "Save shift": "Lưu ca",
  "Ca 1": "Ca 1",
-
  "Download gateway config (mediamtx.yml, contains passwords)": "Tải cấu hình gateway (mediamtx.yml, có chứa mật khẩu)",
  "No stream gateway configured. Install MediaMTX on the station, load the downloaded mediamtx.yml, and set Video__GatewayUrl (e.g. http://station:8889).": "Chưa cấu hình gateway phát hình. Cài MediaMTX trên máy trạm, nạp file mediamtx.yml đã tải và đặt Video__GatewayUrl (ví dụ http://station:8889).",
-
  "Area → Location → Lane. Move lanes between locations in Lane settings. An area or location can only be deleted when it is empty.": "Khu vực → Vị trí → Làn. Chuyển làn giữa các vị trí trong Cấu hình làn. Chỉ xóa được khu vực hoặc vị trí khi không còn gì bên trong.",
  "Code (letters, digits, - or _)": "Mã (chữ, số, - hoặc _)",
  "Overstay alert after (minutes, empty = off)": "Cảnh báo quá giờ sau (phút, để trống = tắt)",
@@ -336,7 +320,6 @@
  "Save location": "Lưu vị trí",
  "Add location": "Thêm vị trí",
  "GIENG-CHINH": "GIENG-CHINH",
-
  "New operator": "Tài khoản mới",
  "Edit operator": "Sửa tài khoản",
  "Account expires (optional, local time)": "Tài khoản hết hạn lúc (không bắt buộc, giờ địa phương)",
@@ -353,10 +336,8 @@
  "Permissions (ViewLive is always included)": "Quyền (luôn có quyền ViewLive)",
  "Save role": "Lưu vai trò",
  "gate-in-1": "gate-in-1",
-
  "Could not load parking records. Check the API connection.": "Không tải được dữ liệu. Kiểm tra kết nối tới máy chủ.",
  "Recognition failed": "Nhận diện không thành công",
-
  "col.action": "Thao tác",
  "col.active": "Đang hoạt động",
  "col.actor": "Người thực hiện",
@@ -420,7 +401,6 @@
  "col.validUntilUtc": "Hiệu lực đến",
  "col.vehiclePresent": "Có xe",
  "col.wallSource": "Luồng phụ",
-
  "Shadow mode records decisions without opening a barrier.": "Chế độ chạy thử chỉ ghi quyết định, không mở barrier.",
  "Lane has a recent or unresolved command. Check its state before retrying.": "Làn đang có lệnh vừa gửi hoặc chưa rõ kết quả. Kiểm tra trước khi thử lại.",
  "Fresh healthy sensor feedback and a closed, clear barrier are required.": "Cần tín hiệu cảm biến mới, bình thường và barrier đang đóng, không vướng.",
@@ -480,5 +460,51 @@
  "Vehicle not found.": "Không tìm thấy phương tiện.",
  "Visit not found.": "Không tìm thấy khách.",
  "User not found.": "Không tìm thấy tài khoản.",
- "Role not found.": "Không tìm thấy vai trò."
+ "Role not found.": "Không tìm thấy vai trò.",
+ "A profile tells the system where the plate, person ID, time and images are in a device message. A new JSON/XML device needs only a profile, no code. The device sends to /api/v1/parking/receiver/<profile ID>?key=… or to a port listed in Receiver:Ports.": "Hồ sơ cho hệ thống biết biển số, mã người, thời gian và ảnh nằm ở đâu trong bản tin của thiết bị. Thiết bị JSON/XML mới chỉ cần một hồ sơ, không cần viết code. Thiết bị gửi tới /api/v1/parking/receiver/<mã hồ sơ>?key=… hoặc tới một cổng khai báo trong Receiver:Ports.",
+ "Built-in adapters (code)": "Adapter có sẵn (viết bằng code)",
+ "Delete this mapping?": "Xoá ánh xạ này?",
+ "Delete this profile? Devices using it will be refused.": "Xoá hồ sơ này? Thiết bị đang dùng hồ sơ sẽ bị từ chối.",
+ "Device input": "Nguồn thiết bị",
+ "Device profiles": "Hồ sơ thiết bị",
+ "Enter a mapping and a sample message first": "Nhập ánh xạ và bản tin mẫu trước",
+ "Face device IDs → people": "Mã trên thiết bị khuôn mặt → người",
+ "Face devices report their own user IDs. Map each device ID to a person here; when a face device is replaced, import the new IDs instead of re-creating people. An unmapped ID raises an UNKNOWN_PERSON alert and goes to guard review.": "Thiết bị nhận diện khuôn mặt gửi mã người dùng riêng của nó. Ánh xạ từng mã trên thiết bị tới một người tại đây; khi thay thiết bị, chỉ cần nhập mã mới thay vì tạo lại người. Mã chưa ánh xạ sẽ sinh cảnh báo UNKNOWN_PERSON và chuyển bảo vệ duyệt.",
+ "ID on the device": "Mã trên thiết bị",
+ "Import": "Nhập",
+ "Import (one per line: device ID, person ID)": "Nhập hàng loạt (mỗi dòng: mã trên thiết bị, mã người)",
+ "Imported": "Đã nhập",
+ "Load T1550 example": "Nạp ví dụ T1550",
+ "Load face terminal example": "Nạp ví dụ máy nhận diện khuôn mặt",
+ "Mapping (JSON)": "Ánh xạ (JSON)",
+ "Message format": "Định dạng bản tin",
+ "Observations read from the sample": "Số kết quả đọc được từ bản tin mẫu",
+ "Profile ID (lowercase, used in the receiver URL)": "Mã hồ sơ (chữ thường, dùng trong URL nhận tin)",
+ "Profile saved": "Đã lưu hồ sơ",
+ "Sample message from the device (kept to re-test later)": "Bản tin mẫu từ thiết bị (lưu lại để kiểm tra sau)",
+ "Save mapping": "Lưu ánh xạ",
+ "Save profile": "Lưu hồ sơ",
+ "Source": "Nguồn",
+ "Source (device profile ID)": "Nguồn (mã hồ sơ thiết bị)",
+ "Test with sample": "Thử với bản tin mẫu",
+ "The mapping or sample is not valid": "Ánh xạ hoặc bản tin mẫu không hợp lệ",
+ "UNKNOWN_PERSON": "Mã người chưa ánh xạ",
+ "The mapping is not valid.": "Ánh xạ không hợp lệ.",
+ "This ID is a built-in adapter. Choose another ID.": "Mã này trùng adapter có sẵn. Hãy chọn mã khác.",
+ "Unknown source: use a device profile ID or a built-in adapter.": "Nguồn không tồn tại: dùng mã hồ sơ thiết bị hoặc adapter có sẵn.",
+ "Send 1–5000 rows.": "Gửi từ 1 đến 5000 dòng.",
+ "col.capturedUtc": "Thời điểm chụp",
+ "col.channel": "Kênh",
+ "col.confidence": "Độ tin cậy",
+ "col.deviceId": "Mã thiết bị",
+ "col.externalId": "Mã trên thiết bị",
+ "col.externalPersonId": "Mã người trên thiết bị",
+ "col.format": "Định dạng",
+ "col.normalizedPlate": "Biển số chuẩn hoá",
+ "col.overviewImageBytes": "Ảnh toàn cảnh (byte)",
+ "col.plateImageBytes": "Ảnh biển số (byte)",
+ "col.rawKey": "Khoá gốc",
+ "col.updatedBy": "Người cập nhật",
+ "col.updatedUtc": "Cập nhật lúc",
+ "col.version": "Phiên bản"
 }

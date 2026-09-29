@@ -7,7 +7,7 @@ import json, re, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / 'ui' / 'src'
-FILES = ['pages/Parking/Parking.jsx', 'components/Layout/MainLayout.jsx', 'contexts/AuthContext.jsx']
+FILES = ['pages/Parking/Parking.jsx', 'pages/Parking/DeviceInputs.jsx', 'components/Layout/MainLayout.jsx', 'contexts/AuthContext.jsx']
 # Values shown through t() at runtime (codes from the API), which can't be found by reading the source.
 RUNTIME_CODES = ['Allow', 'Deny', 'ManualReview', 'Open', 'Acknowledged', 'Resolved', 'FalseAlarm', 'Critical', 'High', 'Medium', 'Low',
     'Entry', 'Exit', 'Vehicle', 'Person', 'Car', 'Motorcycle', 'Registered', 'Guest', 'Delivery', 'Visit', 'WalkIn',
@@ -17,7 +17,7 @@ RUNTIME_CODES = ['Allow', 'Deny', 'ManualReview', 'Open', 'Acknowledged', 'Resol
     'POLICY_MATCH', 'ACTIVE_VISITOR', 'GUARD_APPROVED', 'GUARD_REJECTED', 'BLOCKED_VEHICLE', 'INACTIVE_VEHICLE', 'INVALID_SCORES',
     'PERSON_VEHICLE_CONFLICT', 'INSUFFICIENT_IDENTITY_EVIDENCE', 'GUARD_APPROVAL_REQUIRED', 'REGISTRATION_EXPIRED', 'CATEGORY_REVIEW',
     'EXIT_WITHOUT_ENTRY', 'EXIT_PERSON_MISMATCH', 'DUPLICATE_ENTRY', 'PPE_MISSING', 'PPE_UNCONFIRMED', 'PPE_WARNING', 'PPE_ROI_NOT_SINGLE',
-    'PPE_NO_DATA', 'PPE_OK', 'AUTO_OPEN_HELD', 'BARRIER_OUTCOME_UNKNOWN', 'DEVICE_OFFLINE', 'TAILGATING', 'SAFETY_FAULT', 'UNKNOWN_CAMERA',
+    'PPE_NO_DATA', 'PPE_OK', 'AUTO_OPEN_HELD', 'BARRIER_OUTCOME_UNKNOWN', 'DEVICE_OFFLINE', 'TAILGATING', 'SAFETY_FAULT', 'UNKNOWN_CAMERA', 'UNKNOWN_PERSON',
     'CAMERA_SILENT', 'CAMERA_NOT_RECORDING', 'OVERSTAY', 'UPLOAD_BACKLOG', 'VIDEO_DISK_FULL', 'CLOCK_DRIFT']
 
 def keys():

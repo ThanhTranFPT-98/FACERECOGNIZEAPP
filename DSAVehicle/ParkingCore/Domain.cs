@@ -254,6 +254,8 @@ public class ParkingDb : DbContext
     public DbSet<PresenceRecord> Presence => Set<PresenceRecord>();
     public DbSet<Shift> Shifts => Set<Shift>();
     public DbSet<SyncCursor> SyncCursors => Set<SyncCursor>();
+    public DbSet<DeviceProfile> DeviceProfiles => Set<DeviceProfile>();
+    public DbSet<PersonIdentity> PersonIdentities => Set<PersonIdentity>();
     // A missing row (fresh test database) means the built-in defaults.
     public async Task<SiteSettings> Site(CancellationToken cancellation = default) =>
         await SiteSettings.AsNoTracking().SingleOrDefaultAsync(cancellation) ?? new();
@@ -264,6 +266,7 @@ public class ParkingDb : DbContext
         model.Entity<SiteSettings>().Property(x => x.Id).ValueGeneratedNever();
         model.Entity<CameraInbox>().HasIndex(x => new { x.Status, x.Id });
         model.Entity<CameraInbox>().HasIndex(x => x.PayloadSha256);
+        model.Entity<PersonIdentity>().HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
         model.Entity<EvidenceImage>().HasIndex(x => x.EventId);
         model.Entity<AuthorizedPerson>().HasKey(x => x.PersonId);
         model.Entity<PresenceRecord>().HasIndex(x => x.EventId).IsUnique();

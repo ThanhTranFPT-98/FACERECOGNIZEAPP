@@ -83,7 +83,7 @@ The project started as a face-recognition attendance app (employees/strangers). 
 
 ### Planned, not built
 
-- Receiver for third-party plate cameras (format in the `../tcp` capture). See `docs/THIRD_PARTY_CAMERA_PLAN.md`.
+- Receiver for third-party plate cameras (format in the `../tcp` capture). See `docs/THIRD_PARTY_CAMERA_PLAN.md`. *Built in CR-007; configurable device profiles in CR-015 (`docs/DEVICE_INPUT.md`).*
 - 
 
 ## 2A. General constraints (multi-project)
@@ -110,8 +110,8 @@ Note for contraint: I need you to explain clearly for me, i can not understand h
 | GC-03 | **Keep working offline.** If the link to the centre drops, the site keeps operating in a configured local mode, buffers events and evidence, and syncs later **without losing data**. | 🟡 | CR-001: outbox + local video buffer + uploader to cloud. Two-way sync with a central platform not built |
 | GC-04 | **Guard stations at the same gate sync peer-to-peer.** One PC failing must not stop the others. | ✅ (decided) | Decision 2026-09-25: one PC per guard station, so no peer sync for decisions. Presence between stations is synced (CR-010, option E) |
 Note for contraint: Please explain clearly. There are only one computer in each guard station 
-| GC-05 | **Vendor-neutral input.** Edge devices send one common message format, whatever the camera brand. Each brand gets an adapter. Existing RTSP/ONVIF cameras are reused. | ✅ | CR-007: receiver + inbox + adapters (`t1550`, `generic`) → one observation format. Not yet tried on a real camera |
-| GC-06 | **Reuse the customer's existing devices and data**, e.g. face terminals that already hold enrolled workers, and existing barriers. Integrate their *outputs*; don't replace them. | 🟡 | CR-008: face terminals via the `generic` adapter (terminal PIN = PersonId). ZKTeco-specific protocol unknown (Q3) |
+| GC-05 | **Vendor-neutral input.** Edge devices send one common message format, whatever the camera brand. Each brand gets an adapter. Existing RTSP/ONVIF cameras are reused. | ✅ | CR-007: receiver + inbox + adapters (`t1550`, `generic`) → one observation format. CR-015: new JSON/XML devices by **device profile** (configured in the UI, no code), several receiver ports, SDK connector entry point (`InboxWriter`). Not yet tried on a real camera |
+| GC-06 | **Reuse the customer's existing devices and data**, e.g. face terminals that already hold enrolled workers, and existing barriers. Integrate their *outputs*; don't replace them. | 🟡 | CR-008: face terminals via the `generic` adapter (terminal PIN = PersonId). CR-015: the device's own user IDs are mapped to people (`PersonIdentity`, bulk import), so a replaced face device keeps the enrolled people. ZKTeco-specific protocol unknown (Q3) |
 Note for contraint: We try to use ArcFace for demo at the moment
 | GC-07 | **Open integration API** for HR, access-control and production systems (push/pull events, people, vehicles). | 🟡 | REST exists, but only for our own UI; no documented external API or keys |
 | GC-08 | **Scale without rewrite or downtime.** Add a camera, AI box, lane, area or user from the UI while the system is running. | ✅ | Lanes, users, cameras (incl. AI devices), areas, locations, shifts, roles: all from the UI while running. AI boxes are not managed by this app (decision 2026-09-25) |
@@ -535,7 +535,10 @@ Base URL: `http://localhost:5085`. Every non-GET `/api` call needs the `X-CSRF-T
 | GET | `/api/v1/parking/events/{id}/video` | Admin, Guard |
 | GET | `/api/v1/parking/video/segments/{id}/play` (MP4 stream, or redirect to signed cloud URL) | Admin, Guard |
 | POST | `/api/v1/parking/device/capture`, `/capture-burst`, `/heartbeat` | Device key |
-| POST | `/api/v1/parking/receiver/{adapter}?key=…` · `/api` on `Receiver:Port` | Receiver key · IP allow-list |
+| POST | `/api/v1/parking/receiver/{adapter or profile ID}?key=…` · `/api` on a receiver port (`Receiver:Port`, `Receiver:Ports`) | Receiver key · IP allow-list |
+| GET, PUT · DELETE | `/api/v1/parking/device-profiles` · `/device-profiles/{id}` (CR-015) | ManageSite |
+| POST | `/api/v1/parking/device-profiles/test` (run a sample through a mapping, nothing saved) | ManageSite |
+| GET, PUT · POST · DELETE | `/api/v1/parking/person-identities` · `/import` · `/{id}` (CR-015) | ManagePeople |
 | GET | `/api/v1/parking/device/face-templates` | Device key |
 | — | `/api/Employee`, `/api/Stranger`, `/api/AccessLog`, `/api/Alerts`, `/api/Dashboard`, `/api/embeddings`, `/api/FaceRecognize` | Admin (legacy) |
 | WS | `/parkingHub` (event `ParkingChanged`) · `/notificationHub` | staff · Admin |
@@ -584,6 +587,7 @@ Set these through environment variables (`__` = section separator) or user-secre
 | `Video__GatewayUrl` | — | Stream gateway (MediaMTX WebRTC) base URL for the video wall |
 | `Sync__Key`, `Sync__Peers`, `Sync__CloudPeers` | —, —, — | Shared key (≥ 32 chars); LAN URLs of the other stations; cloud site IDs of the other stations |
 | `Receiver__Port`, `Receiver__PortAdapter`, `Receiver__AllowedIps` | off, `t1550`, — | Fixed-path cameras: `POST /api` on this port only, from these IPs/CIDRs (add the port to `--urls`) |
+| `Receiver__Ports` | — | More fixed-path ports, each with its adapter or device profile: `2124=hik-anpr;2125=zk-face` (CR-015; add each port to `--urls`) |
 
 Site timings (CR-003, stored in the database, not in config): decision valid 30 s · review window 5 min · lane cooldown 8 s · heartbeat freshness 10 s · offline alert 30 s. These are the defaults; change them in *Lane settings* → *Site timing defaults*, or per lane. Still hard-coded (infrastructure): maintenance tick 15 s · AI timeout 20 s · device HTTP timeout 5 s.
 
@@ -746,6 +750,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-015 | 2026-09-29 | ThanhTranFPT-98 (Plan V2 + flexible device input) | Device profiles: configurable input for plate cameras and face devices, identity mapping, SDK connector entry point | High | Done, locally tested; no real device tried |
 | CR-014 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1, done last) | Vietnamese UI and Excel (GC-39) | High | Done for parking UI; legacy face pages still English |
 | CR-013 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 7) | Throughput: lock released during barrier I/O, auto-open queue, load test, pilot runbook | High | Done; measured locally, not on the station PC |
 | CR-012 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 6) | Search, statistics, Excel export | High | Done, locally tested |
@@ -760,6 +765,33 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-015 — Flexible device input: device profiles, identity mapping, SDK entry point (GC-05, GC-06)
+- **Date / requested by:** 2026-09-29, ThanhTranFPT-98. "Plate cameras and face devices may change because we use other devices, so the input from them must be more flexible." Agreed design: options B (declarative profiles) + A (code adapters) in 4 layers; the user writes the vendor SDK code.
+- **Interpretation (what we will build):**
+  - **Device profile** (`DeviceProfile`): a mapping stored in the database, edited in the UI, that turns a vendor JSON or XML message into the common observation. No rebuild for a new JSON/XML device. A profile's ID is used as the adapter name in the receiver URL.
+  - **Profile language:** `records` (which array holds the results), `match` (skip messages that are not results), `fields` (deviceId, channel, plate, personId, confidence, capturedUtc, plateImage, overviewImage, rawKey) with fallbacks, constants, defaults, text transforms, lookup tables, confidence scale and time formats. Reference: `docs/DEVICE_INPUT.md`.
+  - **Identity mapping** (`PersonIdentity`): (source, external ID) → PersonId, so replacing a face device only needs a new mapping, not new person IDs. Unknown external ID → alert `UNKNOWN_PERSON`, the result goes to the guard.
+  - **SDK entry point:** `InboxWriter` — the same "store before ACK" path as the HTTP receiver, callable from an in-process connector (vendor SDK code written by the user).
+  - **Several receiver ports:** `Receiver:Ports` = `2123=t1550;2124=<profile>` for devices that can only post to `host:port/api`.
+- **Acceptance criteria:**
+  - A T1550 profile written in the profile language gives the same observations as the built-in `t1550` adapter (and replays the real capture when present).
+  - Invalid profiles are refused on save with readable errors; a test endpoint shows the result of a sample before saving.
+  - XML input works without DTD/external entities (XXE-safe) and with a depth limit.
+  - A face result with an external ID is resolved through `PersonIdentity`; unmapped IDs raise one alert and never authorise.
+  - Built-in adapters and existing receiver URLs keep working unchanged.
+- **Impacted components:** `ParkingCore/DeviceProfiles.cs` (new), `Receiver.cs`, `Setup.cs`, `Domain.cs`, migrations (both providers), UI tab *Device input*, `docs/DEVICE_INPUT.md`, tests.
+- **Design decision and why; alternatives rejected:** plugin DLLs (C) and embedded scripts (E) rejected — they run unreviewed code inside the process that opens barriers. A separate gateway (D) is deferred until a device needs an SDK on another OS or several stations share one integration layer. A camera result still never opens a barrier by itself: profiles only produce evidence for `ParkingService.Ingest`.
+- **Risks / edge cases:** a wrong mapping silently produces wrong fields → test endpoint, versioned profiles, `TrustedConfidence` stays empty until field evaluation. Image URLs are not fetched (SSRF, blocking). XML single vs repeated elements are both accepted by paths.
+- **DB migration needed?** yes — `DeviceProfiles` / `DeviceProfilesSqlServer`.
+- **Status:** Done, locally tested. No real device of another brand has been connected; the XML/face examples are shaped after public formats, not captured traffic.
+- **Result / verification (2026-09-29):**
+  - Built as specified. UI tab *Device input* (`ui/src/pages/Parking/DeviceInputs.jsx`): profile editor with *Test with sample*, T1550 and face examples, profile list; identity mapping with bulk import. Vietnamese texts added (`i18n_check.py`: 0 missing).
+  - `ParkingCore.Tests` 177 passed (35 new). The T1550 profile gives the same observations as the built-in adapter, and **the real `../tcp` capture replays through the profile: 43 messages, 7 plates, 14 images**. Also covered: refused definitions (missing deviceId, misspelt field, `[*]` outside records, unknown transform, scale misuse, broken JSON), fallback paths, default, transforms, map, 0–100 scale, out-of-range score → invalid, local time + zone, unix/iso time, heartbeat skipped by `match` but still marks the device alive, direct vs identity person IDs, XML (namespace, attributes, single/repeated elements), XXE and depth refused, `Receiver:Ports` parsing, `InboxWriter` (stored / duplicate / bad body / unknown / disabled / built-in first), compiled-profile cache per version.
+  - `integration_parking.py` 12 OK. New `test_device_profiles_and_identities`: test endpoint ok/errors; invalid and built-in-ID profiles refused; version 1 → 2; face profile + mapped ID + listed person + trusted device → **Allow**; unmapped ID → **ManualReview** + `UNKNOWN_PERSON` alert; XML profile on its own receiver port (JSON refused there); disabled profile → 404; delete; audit entries.
+  - `ParkingSimulation.Tests` 14, `test_backup.py`, `ui_smoke.mjs` (4 roles) and the UI build pass. The SDK connector template in `docs/DEVICE_INPUT.md` was compiled inside the project once and removed.
+- **Assumed, not verified:** vendor field names in the examples; that face devices of the site can send JSON/XML over HTTP (otherwise a connector is needed, the user writes the SDK part).
+- **Not done:** PPE stays a code adapter; no MQTT / long-poll connector; no `multipart/form-data`; image URLs are not fetched.
 
 ### CR-014 — Vietnamese UI and Excel (GC-39)
 - **Date / requested by:** 2026-09-25, ThanhTranFPT-98: "Vietnamese required in all site including UI". It was done last on purpose, because every earlier phase changed the UI.

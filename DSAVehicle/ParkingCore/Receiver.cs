@@ -31,13 +31,16 @@ public class CameraInbox
 }
 
 // Vendor-neutral observation every adapter produces (GC-05).
+// ExternalPersonId: the face device's own ID, resolved to PersonId through PersonIdentity by the worker (CR-015).
 public sealed record ExternalObservation(string DeviceId, string Channel, string Plate, int? PersonId, double? Confidence,
-    DateTime? CapturedUtc, byte[]? PlateImage, byte[]? OverviewImage, string RawKey);
+    DateTime? CapturedUtc, byte[]? PlateImage, byte[]? OverviewImage, string RawKey, string? ExternalPersonId = null);
 
 public interface ICameraAdapter
 {
     string Name { get; }
     string Version { get; }
+    // Body format the receiver accepts for this adapter: json, or xml (device profiles).
+    string Format => "json";
     // Returns the observations in the message; an empty list means a message with nothing to decide (e.g. alarm-only).
     IReadOnlyList<ExternalObservation> Parse(JsonElement root);
 }
@@ -154,11 +157,24 @@ public sealed class InboxSignal
 public sealed record ReceiverOptions(string? Key, int? Port, string PortAdapter, string[] AllowedIps)
 {
     public static ReceiverOptions From(IConfiguration c) => new(c["Receiver:Key"], c.GetValue<int?>("Receiver:Port"), c["Receiver:PortAdapter"] ?? "t1550",
-        (c["Receiver:AllowedIps"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        (c["Receiver:AllowedIps"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) { Ports = ParsePorts(c) };
+    // Port → adapter for devices that can only post to "host:port/api": Receiver:Port/PortAdapter plus Receiver:Ports = "2124=hik-anpr;2125=zk-face" (CR-015).
+    public IReadOnlyDictionary<int, string> Ports { get; init; } = new Dictionary<int, string>();
+    public static Dictionary<int, string> ParsePorts(IConfiguration c)
+    {
+        var ports = new Dictionary<int, string>();
+        if (c.GetValue<int?>("Receiver:Port") is int legacy) ports[legacy] = c["Receiver:PortAdapter"] ?? "t1550";
+        foreach (var entry in (c["Receiver:Ports"] ?? "").Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = entry.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && int.TryParse(parts[0], out var port) && port is > 0 and < 65536 && parts[1].Length > 0) ports[port] = parts[1];
+        }
+        return ports;
+    }
 }
 
 [ApiController, AllowAnonymous]
-public class ReceiverController(ParkingDb db, CameraAdapters adapters, InboxSignal signal, IConfiguration config) : ControllerBase
+public class ReceiverController(InboxWriter inbox, IConfiguration config) : ControllerBase
 {
     // Preferred: http://station/api/v1/parking/receiver/{adapter}?key=<Receiver:Key> (key ≥ 32 characters).
     [HttpPost("api/v1/parking/receiver/{adapter}"), RequestSizeLimit(16_000_000)]
@@ -170,14 +186,14 @@ public class ReceiverController(ParkingDb db, CameraAdapters adapters, InboxSign
         return await Store(adapter);
     }
 
-    // For cameras that can only post to "host:port/api" (T1550 capture). Served only on Receiver:Port and only to Receiver:AllowedIps.
+    // For cameras that can only post to "host:port/api" (T1550 capture). Served only on a receiver port and only to Receiver:AllowedIps.
     [HttpPost("api"), RequestSizeLimit(16_000_000)]
     public async Task<IActionResult> ReceiveOnPort()
     {
         var options = ReceiverOptions.From(config);
-        if (options.Port is null || HttpContext.Connection.LocalPort != options.Port) return NotFound();
+        if (!options.Ports.TryGetValue(HttpContext.Connection.LocalPort, out var adapter)) return NotFound();
         if (!IpAllowed(HttpContext.Connection.RemoteIpAddress, options.AllowedIps)) return StatusCode(403);
-        return await Store(options.PortAdapter);
+        return await Store(adapter);
     }
 
     public static bool IpAllowed(IPAddress? remote, string[] allowed)
@@ -205,21 +221,15 @@ public class ReceiverController(ParkingDb db, CameraAdapters adapters, InboxSign
 
     private async Task<IActionResult> Store(string adapterName)
     {
-        if (adapters.Find(adapterName) is null) return NotFound(new { message = "Unknown adapter." });
         using var reader = new StreamReader(Request.Body, Encoding.UTF8);
         var body = await reader.ReadToEndAsync();
-        try { using var _ = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 32 }); }
-        catch (JsonException) { return BadRequest(new { message = "Body must be JSON." }); }
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body)));
-        // A camera retry of the same message is acknowledged again but stored once.
-        var since = DateTime.UtcNow.AddHours(-1);
-        if (!await db.CameraInbox.AnyAsync(x => x.PayloadSha256 == hash && x.ReceivedUtc > since))
+        // Stored (or already stored: a camera retry) before the ACK; see InboxWriter.
+        return await inbox.Store(adapterName, body, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "") switch
         {
-            db.CameraInbox.Add(new CameraInbox { Adapter = adapterName, Payload = body, PayloadSha256 = hash, RemoteIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "" });
-            await db.SaveChangesAsync();   // durable before ACK
-            signal.Notify();
-        }
-        return Ok(new { result = "ok" });
+            InboxOutcome.UnknownAdapter => NotFound(new { message = "Unknown adapter." }),
+            InboxOutcome.BadBody => BadRequest(new { message = "Body must be JSON (or XML for an XML device profile)." }),
+            _ => Ok(new { result = "ok" })
+        };
     }
 }
 
@@ -245,15 +255,16 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
     {
         var db = services.GetRequiredService<ParkingDb>();
         var service = services.GetRequiredService<ParkingService>();
+        var resolver = new DeviceAdapterResolver(adapters, db, services.GetService<ProfileCache>() ?? new ProfileCache());
         var batch = await db.CameraInbox.Where(x => x.Status == "Pending").OrderBy(x => x.Id).Take(20).ToListAsync(stop);
         foreach (var item in batch)
         {
             item.Attempts++;
             try
             {
-                var adapter = adapters.Find(item.Adapter) ?? throw new InvalidDataException("Unknown adapter " + item.Adapter);
+                var adapter = await resolver.Find(item.Adapter, stop) ?? throw new InvalidDataException("Unknown or disabled adapter " + item.Adapter);
                 item.AdapterVersion = adapter.Version;
-                using var document = JsonDocument.Parse(item.Payload ?? "{}");
+                using var document = PayloadFormat.Parse(adapter.Format, item.Payload ?? "{}");
                 if (adapter.Name == "ppe")
                 {
                     var cache = services.GetRequiredService<PpeCache>();
@@ -274,13 +285,16 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
                 if (adapter.Name == "t1550" && document.RootElement.TryGetProperty("data", out var data) && data.TryGetProperty("dev_net_info", out var net)
                     && net.ValueKind == JsonValueKind.Array && net.GetArrayLength() > 0 && T1550Adapter.Normalize(T1550Adapter.Str(net[0], "mac")) is { Length: > 0 } alive)
                     foreach (var seen in await db.Cameras.Where(x => x.ExternalDevice == alive).ToListAsync(stop)) seen.LastMessageUtc = now;
+                // Profiles: a heartbeat skipped by "match" still counts when deviceId is a "$." path readable from the message root.
+                if (adapter is ProfileAdapter profile && profile.DeviceOf(document.RootElement) is { Length: > 0 } profileDevice)
+                    foreach (var seen in await db.Cameras.Where(x => x.ExternalDevice == profileDevice).ToListAsync(stop)) seen.LastMessageUtc = now;
                 item.Observations = observations.Count;
                 var notes = new List<string>();
                 foreach (var observation in observations) notes.Add(await Handle(db, service, item, observation, now));
                 item.Status = observations.Count == 0 ? "Ignored" : "Processed";
                 item.Error = observations.Count == 0 ? "No plate/person observation (e.g. alarm-only message)" : Truncate(string.Join("; ", notes.Where(n => n.Length > 0)));
             }
-            catch (Exception ex) when (ex is JsonException or InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException)
+            catch (Exception ex) when (ex is JsonException or System.Xml.XmlException or InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException)
             {
                 // A malformed message is kept for inspection and never blocks the queue.
                 item.Status = "Failed"; item.Error = Truncate(ex.Message);
@@ -301,6 +315,20 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
             return "unmapped device " + o.DeviceId + "/" + o.Channel;
         }
         camera.LastMessageUtc = now;
+        var note = "";
+        // CR-015: a face device's own ID → our PersonId. An unmapped ID never authorises: the result goes to the guard without a person.
+        if (o.PersonId is null && !string.IsNullOrWhiteSpace(o.ExternalPersonId))
+        {
+            var external = o.ExternalPersonId.Trim();
+            var mapped = await db.PersonIdentities.Where(x => x.Source == item.Adapter && x.ExternalId == external).Select(x => (int?)x.PersonId).SingleOrDefaultAsync();
+            if (mapped is null)
+            {
+                var reason = "UNKNOWN_PERSON:" + item.Adapter + "/" + external;
+                if (!await db.Alerts.AnyAsync(x => x.Reason == reason && !x.Resolved)) db.Alerts.Add(new() { Reason = reason, Severity = "Medium" });
+                note = "unmapped person " + item.Adapter + "/" + external;
+            }
+            o = o with { PersonId = mapped };
+        }
         var plate = VietnamPlate.Normalize(o.Plate);
         // GC-24 merge: the same plate on the same lane within the merge window is one pass, not a new event.
         var window = TimeSpan.FromSeconds((await db.Site()).MergeWindowSeconds);
@@ -310,7 +338,7 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
             // A PPE refusal is not merged: the worker fixes the missing item and is read again straight away.
             var duplicate = await db.Events.AnyAsync(x => x.LaneId == camera.LaneId && x.CreatedUtc >= since && !x.Reason.StartsWith("PPE_")
                 && (plate.Length > 0 ? x.Plate == plate : x.PersonId == o.PersonId));
-            if (duplicate) return "merged into recent event";
+            if (duplicate) return note.Length > 0 ? note + ", merged into recent event" : "merged into recent event";
         }
         // Without a verified confidence the result can only suggest; an admin sets TrustedConfidence after field evaluation.
         var confidence = camera.TrustedConfidence ?? 0;
@@ -321,7 +349,7 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
         var entry = await service.Ingest(camera.LaneId, "rx:" + item.Id + ":" + o.RawKey, recognition, "camera:" + camera.Id, "ThirdPartyCamera", evidence, item.ReceivedUtc, captured);
         if (o.OverviewImage is { } overview && o.PlateImage is not null && service.SaveEvidenceBytes(overview) is string overviewId)
         { db.EvidenceImages.Add(new EvidenceImage { EventId = entry.Id, FileId = overviewId, Kind = "Overview", Sha256 = EvidenceImage.Hash(overview), TakenBy = "camera:" + camera.Id }); }
-        return "";
+        return note;
     }
     private static string Truncate(string text) => text.Length > 500 ? text[..500] : text;
 }

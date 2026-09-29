@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using DSAVehicle.Data;
 using DSAVehicle.Models;
 using DSAVehicle.ParkingCore;
@@ -474,6 +475,145 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     seedDb.RolePermissions.RemoveRange(seedDb.RolePermissions.Where(x => x.RoleId == "Manager" && x.Permission == Perm.ViewReports)); await seedDb.SaveChangesAsync();
     await RoleCatalog.Seed(seedDb); await seedDb.SaveChangesAsync();
     Check(!(await RoleCatalog.Permissions(seedDb, "Manager")).Contains(Perm.ViewReports), "Seeding again does not undo a later removal");
+}
+
+// ---- CR-015: device profiles, identity mapping, SDK entry point ----
+{
+    const string png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+    using var message = System.Text.Json.JsonDocument.Parse("""
+        {"data":{"dev_net_info":[{"device_name":"T1550FAI-Z","mac":"38-24-F1-0E-80-F8","ip":"192.168.1.6"}],
+         "ai_snap_picture":{"PlateInfo":[{"Id":"","GrpId":1,"SnapId":"30A12345","StrChn":"CH1","StartTime":1766061353,"PlateImg":"PNG","BgImg":"PNG"},
+                                         {"Id":"","GrpId":2,"SnapId":"35A39957","StrChn":"CH1","StartTime":1766061354,"PlateImg":"PNG","BgImg":"not-base64!"}]}}}
+        """.Replace("\"PNG\"", "\"" + png + "\""));
+    var t1550Profile = ProfileAdapter.Compile("t1550-profile", "json", ProfileAdapter.T1550Example, "test");
+    var builtInResult = new T1550Adapter().Parse(message.RootElement);
+    var profileResult = t1550Profile.Parse(message.RootElement);
+    Check(profileResult.Count == 2 && profileResult.Zip(builtInResult).All(p => p.First.DeviceId == p.Second.DeviceId && p.First.Channel == p.Second.Channel
+        && p.First.Plate == p.Second.Plate && p.First.CapturedUtc == p.Second.CapturedUtc && p.First.Confidence == p.Second.Confidence
+        && (p.First.PlateImage?.Length ?? 0) == (p.Second.PlateImage?.Length ?? 0) && (p.First.OverviewImage?.Length ?? 0) == (p.Second.OverviewImage?.Length ?? 0)),
+        "T1550 written as a profile gives the same observations as the built-in adapter");
+    Check(profileResult[0].RawKey != profileResult[1].RawKey, "Profile raw keys are unique within a message (index appended)");
+
+    // Invalid mappings are refused with a readable reason before they are saved.
+    string? Refusal(string definition, string format = "json")
+    {
+        try { ProfileAdapter.Compile("x", format, definition, "test"); return null; }
+        catch (ProfileException ex) { return string.Join(" | ", ex.Errors); }
+    }
+    Check(Refusal("""{"fields":{"plate":"a"}}""")?.Contains("deviceId") == true, "A profile without deviceId is refused");
+    Check(Refusal("""{"fields":{"deviceId":"d","plat":"a"}}""")?.Contains("Unknown field 'plat'") == true, "A misspelt field name is refused");
+    Check(Refusal("""{"fields":{"deviceId":"d","plate":"items[*].no"}}""")?.Contains("[*]") == true, "[*] outside records is refused");
+    Check(Refusal("""{"fields":{"deviceId":"d","plate":{"path":"a","transform":"shout"}}}""")?.Contains("shout") == true, "Unknown transform is refused");
+    Check(Refusal("""{"fields":{"deviceId":"d","plate":{"path":"a","scale":100}}}""") is not null, "scale on a non-confidence field is refused");
+    Check(Refusal("""{"fields":{"deviceId":"d","plate":"a"}""") is not null && Refusal("""{"fields":{"deviceId":"d","plate":"a"}}""", "csv") is not null, "Broken JSON and unknown formats are refused");
+    Check(Refusal("""{"records":"a[*]","fields":{"deviceId":"$.dev","personId":"id"}, "personId":"direct"}""") is null, "Valid face profile compiles");
+
+    // Face device, JSON: 0–100 score, local time string, own user IDs.
+    var face = ProfileAdapter.Compile("zk-face", "json", """
+        { "match": [{ "path": "event", "equals": "verify" }],
+          "records": "results[*]",
+          "fields": {
+            "deviceId": "$.device.sn",
+            "channel": { "path": "door", "default": "1" },
+            "personId": { "path": ["userCode", "pin"], "transform": ["trim", "upper"] },
+            "confidence": { "path": "score", "scale": 100 },
+            "capturedUtc": { "path": "time", "time": "yyyy-MM-dd HH:mm:ss", "timeZone": "+07:00" },
+            "overviewImage": "photo" } }
+        """, "test");
+    using var faceMessage = System.Text.Json.JsonDocument.Parse("""
+        {"event":"verify","device":{"sn":"zk-01"},"results":[
+          {"userCode":" nv042 ","score":97,"time":"2026-09-29 08:00:00","photo":"PNG"},
+          {"pin":"77","score":150,"door":"2","time":"bad"}]}
+        """.Replace("\"PNG\"", "\"" + png + "\""));
+    var warnings = new List<string>();
+    var faces = face.Parse(faceMessage.RootElement, warnings);
+    Check(faces.Count == 2 && faces[0].DeviceId == "ZK01" && faces[0].Channel == "1" && faces[1].Channel == "2", "Root path ($.), default and per-record channel");
+    Check(faces[0].ExternalPersonId == "NV042" && faces[0].PersonId is null && faces[1].ExternalPersonId == "77", "Person ID: fallback paths, transforms, looked up later (identity mode)");
+    Check(faces[0].Confidence == .97, "0–100 score scaled to 0–1");
+    Check(faces[0].CapturedUtc == new DateTime(2026, 9, 29, 1, 0, 0, DateTimeKind.Utc), "Local time string with the device time zone → UTC");
+    Check(faces[1].Confidence is double bad && double.IsNaN(bad) && warnings.Any(w => w.Contains("outside 0–1")), "Out-of-range score becomes invalid (guard review) with a warning");
+    Check(faces[1].CapturedUtc is null && warnings.Any(w => w.Contains("does not match")), "Unreadable time stays unknown with a warning");
+    Check(faces[0].OverviewImage is { Length: > 8 }, "Image path without options decodes base64");
+    using var heartbeat = System.Text.Json.JsonDocument.Parse("""{"event":"heartbeat","device":{"sn":"zk-01"}}""");
+    Check(face.Parse(heartbeat.RootElement).Count == 0 && face.DeviceOf(heartbeat.RootElement) == "ZK01", "Heartbeat skipped by match but still identifies the device (liveness)");
+    var direct = ProfileAdapter.Compile("d", "json", """{"personId":"direct","fields":{"deviceId":"sn","personId":"pin","plate":{"path":"plate","map":{"NONE":""}}}}""", "test");
+    using var directMessage = System.Text.Json.JsonDocument.Parse("""[{"sn":"a","pin":"12","plate":"NONE"},{"sn":"a","pin":"E-12"}]""");
+    var directResult = direct.Parse(directMessage.RootElement);
+    Check(directResult[0].PersonId == 12 && directResult[0].ExternalPersonId is null && directResult[0].Plate == "", "Direct mode uses the number as PersonId; map turns a placeholder into empty");
+    Check(directResult[1].PersonId is null && directResult[1].ExternalPersonId == "E-12", "Direct mode falls back to identity lookup for a non-number");
+
+    // XML (e.g. ISAPI-style ANPR): namespaces ignored, attributes as @name, one or many elements both work.
+    var xml = ProfileAdapter.Compile("hik-anpr", "xml", """
+        { "match": [{ "path": "EventNotificationAlert.eventType", "equals": "ANPR" }],
+          "records": "EventNotificationAlert.ANPR[*]",
+          "fields": { "deviceId": "$.EventNotificationAlert.macAddress", "channel": "$.EventNotificationAlert.channelID",
+                      "plate": "licensePlate", "confidence": { "path": "confidenceLevel", "scale": 100 },
+                      "capturedUtc": { "path": "$.EventNotificationAlert.dateTime", "time": "iso" }, "rawKey": "@id" } }
+        """, "test");
+    const string anpr = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <EventNotificationAlert version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+          <macAddress>a4:14:37:00:00:01</macAddress><channelID>1</channelID><dateTime>2026-09-29T08:00:00+07:00</dateTime>
+          <eventType>ANPR</eventType><ANPR id="k1"><licensePlate>30A12345</licensePlate><confidenceLevel>92</confidenceLevel></ANPR>
+        </EventNotificationAlert>
+        """;
+    using (var anprDoc = PayloadFormat.XmlToJson(anpr))
+    {
+        var read = xml.Parse(anprDoc.RootElement);
+        Check(read.Count == 1 && read[0].DeviceId == "A41437000001" && read[0].Plate == "30A12345" && read[0].Confidence == .92 && read[0].Channel == "1", "XML message mapped through a profile (single element, namespace ignored)");
+        Check(read[0].CapturedUtc == new DateTime(2026, 9, 29, 1, 0, 0, DateTimeKind.Utc) && read[0].RawKey.StartsWith("k1/"), "ISO time with offset and attributes (@id) are read");
+    }
+    using (var two = PayloadFormat.XmlToJson(anpr.Replace("</EventNotificationAlert>", "<ANPR id=\"k2\"><licensePlate>30A67890</licensePlate></ANPR></EventNotificationAlert>")))
+        Check(xml.Parse(two.RootElement).Select(o => o.Plate).SequenceEqual(["30A12345", "30A67890"]), "Repeated XML elements become several records");
+    Check(!PayloadFormat.Valid("xml", """<?xml version="1.0"?><!DOCTYPE a [<!ENTITY x SYSTEM "file:///c:/windows/win.ini">]><a>&x;</a>"""), "XML with a DTD / external entity is refused (XXE)");
+    Check(!PayloadFormat.Valid("xml", string.Concat(Enumerable.Repeat("<a>", 40)) + string.Concat(Enumerable.Repeat("</a>", 40))), "Too deeply nested XML is refused");
+    Check(!PayloadFormat.Valid("json", "<a/>") && PayloadFormat.Valid("xml", "<a/>"), "Body format follows the adapter");
+
+    // Several receiver ports, each with its own adapter; the legacy single port still works.
+    var portConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Receiver:Port"] = "2123", ["Receiver:Ports"] = "2124=hik-anpr; 2125 = zk-face; bad; 99999=x" }).Build();
+    var ports = ReceiverOptions.From(portConfig).Ports;
+    Check(ports.Count == 3 && ports[2123] == "t1550" && ports[2124] == "hik-anpr" && ports[2125] == "zk-face", "Receiver:Ports maps ports to adapters; invalid entries ignored");
+
+    // Store-before-ACK entry point shared by the HTTP receiver and SDK connectors.
+    using var inboxConnection = new SqliteConnection("Data Source=:memory:");
+    inboxConnection.Open();
+    using var idb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(inboxConnection).Options);
+    await idb.Database.MigrateAsync();
+    idb.DeviceProfiles.Add(new DeviceProfile { Id = "zk-face", Name = "ZK", Definition = """{"fields":{"deviceId":"sn","personId":"pin"}}""" });
+    idb.DeviceProfiles.Add(new DeviceProfile { Id = "hik-anpr", Name = "Hik", Format = "xml", Definition = """{"fields":{"deviceId":"$.a.mac","plate":"$.a.plate"}}""" });
+    idb.DeviceProfiles.Add(new DeviceProfile { Id = "old", Name = "Old", Enabled = false, Definition = """{"fields":{"deviceId":"sn","plate":"p"}}""" });
+    await idb.SaveChangesAsync();
+    var builtIns = new CameraAdapters([new T1550Adapter(), new GenericAdapter(), new PpeAdapter()]);
+    var resolver = new DeviceAdapterResolver(builtIns, idb, new ProfileCache());
+    var writer = new InboxWriter(idb, resolver, new InboxSignal());
+    Check(await writer.Store("zk-face", """{"sn":"zk-01","pin":"7","t":1}""", "sdk:zk") == InboxOutcome.Stored, "SDK connector stores a message through a profile");
+    Check(await writer.Store("zk-face", """{"sn":"zk-01","pin":"7","t":1}""", "sdk:zk") == InboxOutcome.Duplicate, "The same message again is acknowledged, stored once");
+    Check(await writer.Store("hik-anpr", "<a><mac>1</mac><plate>30A12345</plate></a>", "10.0.0.5") == InboxOutcome.Stored, "XML profile accepts an XML body");
+    Check(await writer.Store("hik-anpr", """{"a":1}""", "10.0.0.5") == InboxOutcome.BadBody, "XML profile refuses a JSON body");
+    Check(await writer.Store("old", """{"sn":"a","p":"x"}""", "x") == InboxOutcome.UnknownAdapter && await writer.Store("nope", "{}", "x") == InboxOutcome.UnknownAdapter, "Disabled or unknown profile is refused");
+    Check(await writer.Store("t1550", """{"data":{}}""", "x") == InboxOutcome.Stored, "Built-in adapters still resolve first");
+    var zkRow = await idb.CameraInbox.FirstAsync(x => x.Adapter == "zk-face");
+    Check(zkRow.Status == "Pending" && zkRow.RemoteIp == "sdk:zk" && await idb.CameraInbox.CountAsync() == 3, "Stored rows wait for the worker, with their source");
+    var cache = new ProfileCache();
+    var v1 = cache.Get(new DeviceProfile { Id = "c", Version = 1, Definition = """{"fields":{"deviceId":"a","plate":"b"}}""" });
+    Check(ReferenceEquals(v1, cache.Get(new DeviceProfile { Id = "c", Version = 1, Definition = "ignored: same version" }))
+        && cache.Get(new DeviceProfile { Id = "c", Version = 2, Definition = """{"fields":{"deviceId":"a","plate":"c"}}""" }).Version == "c/v2", "Compiled profiles are reused until the version changes");
+
+    // Real T1550 capture through the profile, if present on this machine.
+    var capture = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../tcp"));
+    if (File.Exists(capture))
+    {
+        var raw = File.ReadAllText(capture);
+        int messages = 0, observations = 0, images = 0;
+        for (var at = raw.IndexOf("{\"data\""); at >= 0; at = raw.IndexOf("{\"data\"", at + 1))
+        {
+            using var doc = FirstJson(raw[at..]);
+            var found = t1550Profile.Parse(doc.RootElement);
+            messages++; observations += found.Count; images += found.Count(x => x.PlateImage is not null) + found.Count(x => x.OverviewImage is not null);
+        }
+        Check(messages == 43 && observations == 7 && images == 14, "The real capture replays through the T1550 profile: 43 messages, 7 plates, 14 images");
+    }
+    else Console.WriteLine("  (real ../tcp capture not present; profile replay skipped)");
 }
 
 Console.WriteLine($"{count} checks passed.");

@@ -66,6 +66,10 @@ public static class ParkingSetup
         builder.Services.AddSingleton<ICameraAdapter, PpeAdapter>();
         builder.Services.AddSingleton<PpeCache>();
         builder.Services.AddSingleton<CameraAdapters>();
+        // CR-015: device profiles (declarative adapters) and the store-before-ACK entry point shared by the receiver and SDK connectors.
+        builder.Services.AddSingleton<ProfileCache>();
+        builder.Services.AddScoped<DeviceAdapterResolver>();
+        builder.Services.AddScoped<InboxWriter>();
         builder.Services.AddSingleton<InboxSignal>();
         builder.Services.AddHostedService<CameraInboxWorker>();
         builder.Services.AddHostedService<PresenceSyncWorker>();
@@ -112,10 +116,10 @@ public static class ParkingSetup
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseRateLimiter();
-        var receiverPort = app.Configuration.GetValue<int?>("Receiver:Port");
+        var receiverPorts = ReceiverOptions.ParsePorts(app.Configuration).Keys.ToHashSet();
         app.Use(async (context, next) => {
-            // The camera receiver port serves exactly one thing: POST /api from allow-listed cameras (CR-007).
-            var onReceiverPort = receiverPort is not null && context.Connection.LocalPort == receiverPort;
+            // A camera receiver port serves exactly one thing: POST /api from allow-listed cameras (CR-007, several ports CR-015).
+            var onReceiverPort = receiverPorts.Contains(context.Connection.LocalPort);
             if (onReceiverPort && !(HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Equals("/api"))) { context.Response.StatusCode = 404; return; }
             if (onReceiverPort || context.Request.Path.StartsWithSegments("/api/v1/parking/receiver")) { await next(); return; }
             if (context.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method)

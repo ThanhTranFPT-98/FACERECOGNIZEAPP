@@ -439,6 +439,65 @@ class ParkingIntegration(unittest.TestCase):
         self.assertFalse(self.wait_events(lambda e: e['plate'] == '30C77777', seconds=1))
         print('Verified camera receiver: key, store-before-ACK dedupe, merge, trust, unknown device, alarm-only, receiver-port isolation.')
 
+    def test_device_profiles_and_identities(self):
+        # CR-015: a new device is added by configuration (profile + identity mapping), no code, no rebuild.
+        root = '/api/v1/parking'
+        key = secrets.token_urlsafe(32)
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0)); xml_port = listener.getsockname()[1]
+        self.env.update({'Receiver__Key': key, 'Receiver__Ports': f'{xml_port}=hik-xml', 'Receiver__AllowedIps': '127.0.0.1'})
+        self.extra_urls = [f'http://127.0.0.1:{xml_port}']
+        self.process.terminate(); self.process.wait(timeout=10); self.start()
+        self.login_as('admin')
+        face = {'match': [{'path': 'event', 'equals': 'verify'}],
+                'fields': {'deviceId': '$.device.sn', 'personId': {'path': 'userCode', 'transform': ['trim', 'upper']}, 'confidence': {'path': 'score', 'scale': 100}}}
+        sample = {'event': 'verify', 'device': {'sn': 'ZK-09'}, 'userCode': ' nv042 ', 'score': 97}
+        status, result = self.call('POST', root + '/device-profiles/test', {'format': 'json', 'definition': json.dumps(face), 'sample': json.dumps(sample)})
+        self.assertEqual(status, 200)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['observations'][0]['externalPersonId'], result['observations'][0]['confidence']), ('NV042', '0.97'))
+        status, result = self.call('POST', root + '/device-profiles/test', {'format': 'json', 'definition': '{"fields":{"plate":"a"}}', 'sample': '{}'})
+        self.assertFalse(result['ok']); self.assertTrue(any('deviceId' in e for e in result['errors']))
+        self.assertEqual(self.call('PUT', root + '/device-profiles', {'id': 'zk-face', 'name': 'Face', 'definition': '{"fields":{}}'})[0], 409)
+        self.assertEqual(self.call('PUT', root + '/device-profiles', {'id': 't1550', 'name': 'Clash', 'definition': json.dumps(face)})[0], 409)
+        profile = {'id': 'zk-face', 'name': 'Face terminal', 'format': 'json', 'definition': json.dumps(face), 'sample': json.dumps(sample)}
+        self.assertEqual(self.call('PUT', root + '/device-profiles', profile)[1]['version'], 1)
+        self.assertEqual(self.call('PUT', root + '/device-profiles', profile)[1]['version'], 2)
+        lane = {'id': 'flap-9', 'direction': 'Entry', 'policy': 'FaceOnly', 'plateThreshold': .9, 'faceThreshold': .8, 'shadowMode': True, 'simulation': True, 'subject': 'Person'}
+        self.assertEqual(self.call('PUT', root + '/lanes', lane)[0], 200)
+        self.assertEqual(self.call('PUT', root + '/cameras', {'id': 'face-9', 'name': 'Face 9', 'laneId': 'flap-9', 'externalDevice': 'ZK-09', 'trustedConfidence': .99})[0], 200)
+        self.assertEqual(self.call('PUT', root + '/people', {'personId': 42, 'name': 'Worker 42', 'active': True})[0], 200)
+        self.assertEqual(self.call('PUT', root + '/person-identities', {'source': 'nope', 'externalId': 'NV042', 'personId': 42})[0], 409)
+        self.assertEqual(self.call('PUT', root + '/person-identities', {'source': 'zk-face', 'externalId': 'NV042', 'personId': 42})[0], 200)
+        self.assertEqual(self.call('POST', root + '/person-identities/import', [{'source': 'zk-face', 'externalId': 'NV043', 'personId': 43}])[1]['imported'], 1)
+        url = f'{self.base}{root}/receiver/zk-face?key={key}'
+        self.assertEqual(self.post_raw(url, {**sample, 't': 1}), 200)
+        known = self.wait_events(lambda e: e['laneId'] == 'flap-9' and e.get('personId') == 42)
+        self.assertTrue(known)
+        self.assertEqual(known[0]['outcome'], 'Allow')                                  # mapped ID + listed person + trusted device
+        self.assertEqual(self.post_raw(url, {**sample, 'userCode': 'nv999', 't': 2}), 200)
+        unknown = self.wait_events(lambda e: e['laneId'] == 'flap-9' and e.get('personId') is None)
+        self.assertEqual(unknown[0]['outcome'], 'ManualReview')                         # unmapped ID never authorises
+        self.assertTrue(any(a['reason'] == 'UNKNOWN_PERSON:zk-face/NV999' for a in self.call('GET', root + '/snapshot')[1]['alerts']))
+        # XML device on its own receiver port (it can only post to host:port/api).
+        xml_profile = {'records': 'Alert.ANPR[*]', 'fields': {'deviceId': '$.Alert.mac', 'plate': 'plate'}}
+        self.assertEqual(self.call('PUT', root + '/device-profiles', {'id': 'hik-xml', 'name': 'XML ANPR', 'format': 'xml', 'definition': json.dumps(xml_profile)})[0], 200)
+        self.assertEqual(self.call('PUT', root + '/cameras', {'id': 'lpr-9', 'name': 'XML plate', 'laneId': 'entry-1', 'externalDevice': 'A4-14-37-00-00-09'})[0], 200)
+        def post_xml(body, content_type='application/xml'):
+            request = urllib.request.Request(f'http://127.0.0.1:{xml_port}/api', data=body.encode(), method='POST', headers={'Content-Type': content_type})
+            try: return urllib.request.urlopen(request, timeout=10).status
+            except urllib.error.HTTPError as exc: return exc.code
+        self.assertEqual(post_xml('<Alert xmlns="urn:x"><mac>a4:14:37:00:00:09</mac><ANPR><plate>30H99999</plate></ANPR></Alert>'), 200)
+        self.assertEqual(post_xml('{"Alert":{}}', 'application/json'), 400)             # the port's profile expects XML
+        self.assertEqual(self.wait_events(lambda e: e['plate'] == '30H99999')[0]['outcome'], 'ManualReview')
+        # Disabled profile: its messages are refused; deleting keeps the audit trail.
+        self.call('PUT', root + '/device-profiles', {**profile, 'enabled': False})
+        self.assertEqual(self.post_raw(url, {**sample, 't': 3}), 404)
+        self.assertEqual(self.call('DELETE', root + '/device-profiles/zk-face')[0], 204)
+        audit = json.dumps(self.call('GET', root + '/audit')[1])
+        self.assertIn('SaveDeviceProfile', audit); self.assertIn('DeleteDeviceProfile', audit)
+        print('Verified device profiles: test endpoint, validation, versioning, identity mapping (known -> Allow, unknown -> review + alert), XML on its own port, disable/delete.')
+
     def test_person_lane_face_terminal_and_ppe(self):
         root = '/api/v1/parking'
         key = secrets.token_urlsafe(32)

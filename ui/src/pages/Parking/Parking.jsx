@@ -4,6 +4,7 @@ import * as signalR from '@microsoft/signalr'
 import api from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { t, tk, getLang } from '../../i18n'
+import DeviceInputs from './DeviceInputs'
 const base = '/v1/parking'
 const opts = values => values.map(value => ({ value, label: t(value) }))
 const field = (name, label, input = <Input />, required = true) => <Form.Item key={name} name={name} label={t(label)} rules={required ? [{ required: true, message: t('Required') }] : []}>{input}</Form.Item>
@@ -371,6 +372,7 @@ export default function Parking() {
       { key: 'devices', label: t('Device health'), children: operations },
       ...(can('ViewEvidence') ? [{ key: 'cameras', label: t('Cameras & video'), children: cameraTab }, { key: 'wall', label: t('Video wall'), children: wallTab }] : []), { key: 'history', label: t('Reports & audit'), children: historyTab },
       ...(can('ManageSite') ? [{ key: 'areas', label: t('Areas'), children: areasTab }, { key: 'lanes', label: t('Lane settings'), children: settings }] : []),
+      ...(can('ManageSite') || can('ManagePeople') ? [{ key: 'devices', label: t('Device input'), children: <DeviceInputs can={can} /> }] : []),
       ...(can('ManageUsers') ? [{ key: 'users', label: t('Operators & roles'), children: accounts }] : []),
     ]} /></Card>
     <Modal title={t(review?.reconcile ? 'Confirm physical inspection' : 'Guard review')} open={!!review} onCancel={() => setReview(null)} footer={<Space>
