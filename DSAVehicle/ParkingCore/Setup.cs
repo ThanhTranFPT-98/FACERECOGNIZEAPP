@@ -20,8 +20,9 @@ public static class ParkingSetup
         Directory.CreateDirectory(directory);
         var cloud = CloudOptions.From(builder.Configuration);
         var video = VideoOptions.From(builder.Configuration);
+        var platform = PlatformOptions.From(builder.Configuration);
         // The outbox is only filled while cloud sync is enabled, so a site without cloud storage does not accumulate unsent rows.
-        void Outbox(DbContextOptionsBuilder options) { if (cloud.Enabled) options.AddInterceptors(new SyncOutboxInterceptor()); }
+        void Outbox(DbContextOptionsBuilder options) { if (cloud.Enabled || platform.Enabled) options.AddInterceptors(new SyncOutboxInterceptor()); }
         if (builder.Configuration["Parking:Provider"] == "SqlServer")
         {
             builder.Services.AddDbContext<ParkingSqlServerDb>(options => { options.UseSqlServer(builder.Configuration.GetConnectionString("Parking")); Outbox(options); });
@@ -34,6 +35,18 @@ public static class ParkingSetup
                 ? new FolderObjectStorage(cloud.FolderPath ?? throw new InvalidOperationException("Cloud:FolderPath is required for the Folder provider."))
                 : new S3ObjectStorage(cloud));
             builder.Services.AddHostedService<CloudUploader>();
+        }
+        // Records to the FPT Cloud platform (dsa.station/1). With Cloud:Enabled as well, S3 keeps receiving video only.
+        if (platform.Enabled)
+        {
+            platform.Validate();
+            builder.Services.AddHttpClient("platform", client => {
+                client.BaseAddress = new Uri(platform.Url!.TrimEnd('/') + "/");
+                client.DefaultRequestHeaders.Add("X-Station-Key", platform.Key);
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+            builder.Services.AddHostedService<PlatformUploader>();
+            builder.Services.AddHostedService<PlatformHeartbeat>();
         }
         if (video.Enabled) builder.Services.AddHostedService<VideoRecorderSupervisor>();
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

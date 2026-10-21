@@ -751,6 +751,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-016 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.2, §5.1, §5.3) | Station → FPT Cloud platform: events, evidence, heartbeat (dsa.station/1 draft) | High | Done; tested against a local DSA_Platform; contract still a draft |
 | CR-015 | 2026-09-29 | ThanhTranFPT-98 (Plan V2 + flexible device input) | Device profiles: configurable input for plate cameras and face devices, identity mapping, SDK connector entry point | High | Done, locally tested; no real device tried |
 | CR-014 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1, done last) | Vietnamese UI and Excel (GC-39) | High | Done for parking UI; legacy face pages still English |
 | CR-013 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 7) | Throughput: lock released during barrier I/O, auto-open queue, load test, pilot runbook | High | Done; measured locally, not on the station PC |
@@ -766,6 +767,23 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-016 — Station → FPT Cloud platform: events, evidence, heartbeat
+- **Date / requested by:** 2026-10-21, ThanhTranFPT-98. Station plan §4.2 ("reuse the outbox, add the platform API as a destination"), §5.1 and §5.3. Milestone: simulator → station → cloud run on 30/10.
+- **Interpretation (what we built):** `ParkingCore/Platform/Sync/PlatformSync.cs`, off by default (`Platform:Enabled`).
+  - `PlatformUploader` reads the CR-001 outbox (same transaction as the decision, so nothing is lost) and sends batches of 50 to `POST /api/v1/stations/{id}/events`; each decision's photo first to `PUT …/evidence/{file}` with `X-Sha256`.
+  - Mapping: `AccessEvent` → `access_event` (+ `areaCode`, `direction` In/Out from the lane, `evidenceId`), `DeviceCommand` with `PassageUtc` → `passage` (+ the decision's person and plate), `PresenceRecord` → `presence`, `ParkingAlert` → `alert`. Commands without a passage and `ParkingSession` have no contract type → `Skipped`.
+  - Item ID = entity ID + outbox ID, `seq` = outbox ID: every change of a record is its own item (a reviewed decision is sent again; newest `seq` wins on the platform) and a resend is the same item (stored once).
+  - A row is `Sent` only when the platform lists it as accepted; `Rejected` rows keep the reason, raise `PLATFORM_REJECTED` and are not retried; network/5xx → `Failed` with the CR-001 backoff. Photo already on the platform under other content (409) → `PLATFORM_EVIDENCE_CONFLICT`.
+  - `PlatformHeartbeat` posts `…/health` every `Platform:HeartbeatSeconds` (60): version, outbox backlog, oldest pending, free disk, AI cameras (last message) and live lanes (bridge heartbeat) as Online/Offline. `masterVersion` stays null until master pull is built.
+  - With `Cloud:Enabled` as well, `CloudUploader` sends **video only** to S3 (records go to the platform).
+- **Acceptance criteria:** every record kind of the contract reaches the platform once per change; an outage or a rejection never loses or duplicates a record; a photo is uploaded once per decision with a verifiable hash; times are sent as UTC (`Z`), also for rows read back from SQLite.
+- **Design decision and why; alternatives rejected:** item ID per *change* instead of per record (the draft): the outbox snapshots every change, and a per-record ID would make the platform drop reviews as duplicates. A second outbox for the platform was rejected: one outbox keeps one source of truth for "not yet delivered".
+- **Risks / edge cases:** contract fields are a draft (`personId` is still the station's integer; `ppe` is sent as `ppeOutcome`/`ppeSummary`, not the draft's nested object); extra evidence images (`EvidenceImage`, overview/inspection) and `Visit` are not sent yet.
+- **DB migration needed?** no (new outbox status values `Skipped`, `Rejected` only).
+- **Status:** Done, locally tested.
+- **Result / verification (2026-10-21):** `ParkingCore.Tests` 191 passed (14 new, against a fake platform: mapping, photo first with SHA-256 and only once, review sent as a new item, UTC times after a SQLite round trip, rejected kept and alerted, outage retried with backoff, heartbeat shape). With `PLATFORM_E2E_URL` set, the same suite ran against a real `DSA_Platform` (PostgreSQL 16.8, station created and key rotated through its admin API): every item accepted, evidence stored with matching size, heartbeat stored (`station-1.0.0`, device Online). `ParkingSimulation.Tests` 14 passed.
+- **Not done:** master pull from the platform (waits on the `personId` string/int decision, contracts/CHO_CHOT.md 1a/2b); `Visit` and `EvidenceImage` upload; upload bandwidth cap for photos.
 
 ### CR-015 — Flexible device input: device profiles, identity mapping, SDK entry point (GC-05, GC-06)
 - **Date / requested by:** 2026-09-29, ThanhTranFPT-98. "Plate cameras and face devices may change because we use other devices, so the input from them must be more flexible." Agreed design: options B (declarative profiles) + A (code adapters) in 4 layers; the user writes the vendor SDK code.

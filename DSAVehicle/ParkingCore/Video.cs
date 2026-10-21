@@ -487,7 +487,8 @@ public sealed class CloudUploader(IServiceScopeFactory scopes, IConfiguration co
             {
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ParkingDb>();
-                var busy = await RunOnceAsync(db, storage, cloud, video.ResolveDirectory(environment), EvidenceStorage.Directory(environment, config), DateTime.UtcNow, stop);
+                var busy = await RunOnceAsync(db, storage, cloud, video.ResolveDirectory(environment), EvidenceStorage.Directory(environment, config), DateTime.UtcNow, stop,
+                    records: !PlatformOptions.From(config).Enabled);
                 if (!busy) await Task.Delay(TimeSpan.FromSeconds(5), stop);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
@@ -496,10 +497,12 @@ public sealed class CloudUploader(IServiceScopeFactory scopes, IConfiguration co
     }
 
     // Records and photos go before video so a video backlog never hides new events. Returns true when work remains.
-    public static async Task<bool> RunOnceAsync(ParkingDb db, IObjectStorage storage, CloudOptions cloud, string videoDirectory, string evidenceDirectory, DateTime now, CancellationToken stop)
+    // records = false when the platform uploader (Platform:Enabled) owns the outbox: S3 then receives video only.
+    public static async Task<bool> RunOnceAsync(ParkingDb db, IObjectStorage storage, CloudOptions cloud, string videoDirectory, string evidenceDirectory, DateTime now, CancellationToken stop,
+        bool records = true)
     {
-        var records = await db.Outbox.Where(x => x.Status != "Sent" && (x.NextAttemptUtc == null || x.NextAttemptUtc <= now)).OrderBy(x => x.Id).Take(50).ToListAsync(stop);
-        foreach (var item in records)
+        var batch = records ? await db.Outbox.Where(x => x.Status != "Sent" && (x.NextAttemptUtc == null || x.NextAttemptUtc <= now)).OrderBy(x => x.Id).Take(50).ToListAsync(stop) : [];
+        foreach (var item in batch)
         {
             try
             {
@@ -549,10 +552,10 @@ public sealed class CloudUploader(IServiceScopeFactory scopes, IConfiguration co
         }
         var backlogBefore = now.AddMinutes(-cloud.BacklogAlertMinutes);
         var oldestPending = await db.VideoSegments.Where(x => x.Status == "Recorded" || x.Status == "Failed").OrderBy(x => x.StartUtc).Select(x => (DateTime?)x.StartUtc).FirstOrDefaultAsync(stop);
-        if (oldestPending < backlogBefore || await db.Outbox.AnyAsync(x => x.Status != "Sent" && x.CreatedUtc < backlogBefore, stop))
+        if (oldestPending < backlogBefore || (records && await db.Outbox.AnyAsync(x => x.Status != "Sent" && x.CreatedUtc < backlogBefore, stop)))
         { await ParkingAlerts.RaiseOnce(db, "UPLOAD_BACKLOG", "High", stop); await db.SaveChangesAsync(stop); }
-        await db.Outbox.Where(x => x.Status == "Sent" && x.SentUtc < now.AddDays(-7)).ExecuteDeleteAsync(stop);
-        return records.Count == 50 || segments.Count == 5;
+        if (records) await db.Outbox.Where(x => x.Status == "Sent" && x.SentUtc < now.AddDays(-7)).ExecuteDeleteAsync(stop);
+        return batch.Count == 50 || segments.Count == 5;
     }
     private static void Fail(SyncOutboxItem item, Exception ex, DateTime now)
     {

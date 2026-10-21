@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -616,6 +618,105 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     else Console.WriteLine("  (real ../tcp capture not present; profile replay skipped)");
 }
 
+// ---- Station → FPT Cloud platform (dsa.station/1 draft) ----
+{
+    using var pconn = new SqliteConnection("Data Source=:memory:");
+    pconn.Open();
+    using var pdb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(pconn).AddInterceptors(new SyncOutboxInterceptor()).Options);
+    pdb.Database.EnsureCreated();
+    var pevidence = Directory.CreateTempSubdirectory("platform-evidence-");
+    try
+    {
+        Check(await Throws(() => { new PlatformOptions { Enabled = true, Url = "http://x", StationId = "S", Key = "short" }.Validate(); return Task.CompletedTask; }), "Platform settings need a URL, station ID and a key of ≥ 32 characters");
+        var parea = new Area { Code = "CUALO", Name = "Cửa lò" };
+        var plocation = new Location { AreaId = parea.Id, Name = "Giếng chính" };
+        pdb.Areas.Add(parea); pdb.Locations.Add(plocation);
+        pdb.Lanes.Add(new Lane { Id = "CL-L3", LocationId = plocation.Id, Direction = "Entry", Simulation = false });
+        pdb.Cameras.Add(new Camera { Id = "face-3", ExternalDevice = "FACES3", LastMessageUtc = DateTime.UtcNow });
+        await pdb.SaveChangesAsync();
+        var photo = new byte[] { 0xFF, 0xD8, 0xFF, 1, 2, 3 };
+        File.WriteAllBytes(Path.Combine(pevidence.FullName, "a1.jpg"), photo);
+        var decided = new AccessEvent { LaneId = "CL-L3", CorrelationId = "p1", Plate = "14B123456", PersonId = 1023, Outcome = "Allow", Reason = "POLICY_MATCH", EvidenceId = "a1.jpg", Shift = "Ca 1" };
+        pdb.Events.Add(decided); await pdb.SaveChangesAsync();
+        var opened = new DeviceCommand { EventId = decided.Id, LaneId = "CL-L3" };
+        pdb.Commands.Add(opened); await pdb.SaveChangesAsync();
+        opened.Status = "Acknowledged"; opened.PassageUtc = DateTime.UtcNow; await pdb.SaveChangesAsync();
+        pdb.Sessions.Add(new ParkingSession { Plate = "14B123456", EntryCommandId = opened.Id, EntryUtc = DateTime.UtcNow }); await pdb.SaveChangesAsync();
+
+        var platformOptions = new PlatformOptions { Enabled = true, Url = "http://platform.test", StationId = "CUALO-GC", Key = new string('k', 40) };
+        var fake = new FakePlatform();
+        var http = new HttpClient(fake) { BaseAddress = new Uri("http://platform.test/") };
+        await PlatformUploader.RunOnceAsync(pdb, http, platformOptions, pevidence.FullName, DateTime.UtcNow);
+        var rows = pdb.Outbox.AsNoTracking().OrderBy(x => x.Id).ToList();
+        Check(rows.Select(x => x.Status).SequenceEqual(["Sent", "Skipped", "Sent", "Skipped"]), "Decision and passage sent; a command without passage and a session are skipped (no contract type)");
+        Check(fake.Evidence.Count == 1 && fake.Evidence[0].Path == "/api/v1/stations/CUALO-GC/evidence/a1.jpg" && fake.Evidence[0].Sha == Convert.ToHexString(SHA256.HashData(photo)),
+            "The decision's photo is uploaded first, with its SHA-256");
+        var sent = fake.Batches.Single();
+        Check(fake.EventPaths.Single() == "/api/v1/stations/CUALO-GC/events" && sent.GetProperty("schema").GetString() == "dsa.station/1" && sent.GetProperty("stationId").GetString() == "CUALO-GC",
+            "One batch to the station's events URL, with schema and station");
+        var access = sent.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("type").GetString() == "access_event");
+        var passage = sent.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("type").GetString() == "passage");
+        Check(access.GetProperty("id").GetString() == decided.Id + "." + rows[0].Id && access.GetProperty("seq").GetInt64() == rows[0].Id, "Item ID = record ID + outbox ID; seq = outbox ID");
+        var ap = access.GetProperty("payload");
+        Check(ap.GetProperty("areaCode").GetString() == "CUALO" && ap.GetProperty("direction").GetString() == "In" && ap.GetProperty("personId").GetInt32() == 1023
+            && ap.GetProperty("evidenceId").GetString() == "a1.jpg" && ap.GetProperty("shift").GetString() == "Ca 1", "Decision payload gains area code, direction and evidence ID");
+        Check(passage.GetProperty("payload").GetProperty("plate").GetString() == "14B123456" && passage.GetProperty("payload").GetProperty("personId").GetInt32() == 1023
+            && passage.GetProperty("payload").GetProperty("areaCode").GetString() == "CUALO", "Passage carries the decision's person, plate and area (trace on the platform)");
+
+        pdb.ChangeTracker.Clear();
+        var reviewed = pdb.Events.Single(); reviewed.Outcome = "Deny"; reviewed.ReviewBy = "GUARD1"; await pdb.SaveChangesAsync();
+        await PlatformUploader.RunOnceAsync(pdb, http, platformOptions, pevidence.FullName, DateTime.UtcNow);
+        var again = fake.Batches[1].GetProperty("items")[0];
+        Check(again.GetProperty("payload").GetProperty("outcome").GetString() == "Deny" && again.GetProperty("id").GetString() != access.GetProperty("id").GetString(), "A reviewed decision is sent again as a new item");
+        Check(again.GetProperty("occurredUtc").GetString()!.EndsWith('Z') && again.GetProperty("payload").GetProperty("createdUtc").GetString()!.EndsWith('Z'), "Times read back from SQLite are still sent as UTC");
+        Check(fake.Evidence.Count == 1, "The photo is not uploaded again for a later version");
+
+        fake.Reject = true;
+        var refused = new ParkingAlert { Reason = "TEST_REJECT" };
+        pdb.Alerts.Add(refused); await pdb.SaveChangesAsync();
+        await PlatformUploader.RunOnceAsync(pdb, http, platformOptions, pevidence.FullName, DateTime.UtcNow);
+        var refusedRow = pdb.Outbox.AsNoTracking().Single(x => x.EntityId == refused.Id.ToString());
+        Check(refusedRow.Status == "Rejected" && refusedRow.LastError!.Contains("unknown type") && pdb.Alerts.Any(x => x.Reason == "PLATFORM_REJECTED"), "A rejected item is kept with the reason and raises an alert");
+
+        fake.Reject = false; fake.Status = System.Net.HttpStatusCode.InternalServerError;
+        var outage = new ParkingAlert { Reason = "TEST_OUTAGE" };
+        pdb.Alerts.Add(outage); await pdb.SaveChangesAsync();
+        var now = DateTime.UtcNow;
+        await PlatformUploader.RunOnceAsync(pdb, http, platformOptions, pevidence.FullName, now);
+        var outageRow = pdb.Outbox.AsNoTracking().Single(x => x.EntityId == outage.Id.ToString());
+        Check(outageRow.Status == "Failed" && outageRow.Attempts == 1 && outageRow.NextAttemptUtc > now, "Platform down: the batch is kept and retried later (backoff)");
+        fake.Status = System.Net.HttpStatusCode.OK;
+        await PlatformUploader.RunOnceAsync(pdb, http, platformOptions, pevidence.FullName, now.AddHours(1));
+        Check(pdb.Outbox.AsNoTracking().Single(x => x.Id == outageRow.Id).Status == "Sent" && pdb.Outbox.AsNoTracking().Single(x => x.Id == refusedRow.Id).Status == "Rejected",
+            "After the outage it is sent; a rejected item is not retried");
+
+        var report = System.Text.Json.JsonSerializer.SerializeToElement(await PlatformHeartbeat.Report(pdb, AppContext.BaseDirectory, DateTime.UtcNow), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var devices = report.GetProperty("devices").EnumerateArray().ToList();
+        Check(report.GetProperty("softwareVersion").GetString() is { Length: <= 40 } software && software.StartsWith("station-") && report.GetProperty("diskFreeGb").GetDouble() > 0
+            && devices.Any(d => d.GetProperty("id").GetString() == "face-3" && d.GetProperty("status").GetString() == "Online")
+            && devices.Any(d => d.GetProperty("id").GetString() == "CL-L3" && d.GetProperty("kind").GetString() == "Barrier" && d.GetProperty("status").GetString() == "Offline"),
+            "Heartbeat: version, disk, AI camera online, live lane without bridge heartbeat offline");
+
+        // Optional: against a running DSA_Platform (PLATFORM_E2E_URL, PLATFORM_E2E_STATION, PLATFORM_E2E_KEY).
+        if (Environment.GetEnvironmentVariable("PLATFORM_E2E_URL") is { Length: > 0 } e2eUrl)
+        {
+            var e2e = new PlatformOptions { Enabled = true, Url = e2eUrl, StationId = Environment.GetEnvironmentVariable("PLATFORM_E2E_STATION"), Key = Environment.GetEnvironmentVariable("PLATFORM_E2E_KEY") };
+            e2e.Validate();
+            var real = new HttpClient { BaseAddress = new Uri(e2eUrl.TrimEnd('/') + "/") };
+            real.DefaultRequestHeaders.Add("X-Station-Key", e2e.Key);
+            pdb.Outbox.Where(x => x.Status == "Sent").ExecuteUpdate(x => x.SetProperty(r => r.Status, "Pending").SetProperty(r => r.NextAttemptUtc, (DateTime?)null));
+            pdb.ChangeTracker.Clear();   // ExecuteUpdate bypasses tracked rows; the uploader runs on a fresh context in production
+            await PlatformUploader.RunOnceAsync(pdb, real, e2e, pevidence.FullName, DateTime.UtcNow.AddHours(2));
+            var notSent = pdb.Outbox.AsNoTracking().Where(x => x.Status == "Pending" || x.Status == "Failed").Select(x => x.Id + " " + x.EntityType + " " + x.LastError).ToList();
+            Check(notSent.Count == 0, "E2E: the real platform accepts every item" + (notSent.Count > 0 ? " — " + notSent[0] : ""));
+            var health = await real.PostAsJsonAsync($"api/v1/stations/{e2e.StationId}/health", await PlatformHeartbeat.Report(pdb, AppContext.BaseDirectory, DateTime.UtcNow));
+            Check(health.IsSuccessStatusCode, "E2E: the real platform accepts the heartbeat");
+        }
+        else Console.WriteLine("  (PLATFORM_E2E_URL not set; run against a real platform skipped)");
+    }
+    finally { pevidence.Delete(true); }
+}
+
 Console.WriteLine($"{count} checks passed.");
 
 // Reads the first JSON value from text that continues with other data (an HTTP capture). Sync helper: Utf8JsonReader can't live in async code.
@@ -630,6 +731,30 @@ static async Task<bool> Throws(Func<Task> action)
     try { await action(); return false; }
     catch (InvalidOperationException) { return true; }
     catch (DbUpdateException) { return true; }
+}
+
+// Records what the station sends and answers like the platform would (accepted, rejected or an outage).
+sealed class FakePlatform : HttpMessageHandler
+{
+    public List<System.Text.Json.JsonElement> Batches { get; } = [];
+    public List<string> EventPaths { get; } = [];
+    public List<(string Path, string? Sha)> Evidence { get; } = [];
+    public bool Reject { get; set; }
+    public System.Net.HttpStatusCode Status { get; set; } = System.Net.HttpStatusCode.OK;
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+    {
+        if (Status != System.Net.HttpStatusCode.OK) return new HttpResponseMessage(Status) { Content = new StringContent("platform down") };
+        if (request.Method == HttpMethod.Put)
+        {
+            Evidence.Add((request.RequestUri!.AbsolutePath, request.Headers.TryGetValues("X-Sha256", out var sha) ? sha.Single() : null));
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+        var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellation)).RootElement.Clone();
+        Batches.Add(body); EventPaths.Add(request.RequestUri!.AbsolutePath);
+        var ids = body.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("id").GetString()!).ToArray();
+        object answer = Reject ? new { accepted = Array.Empty<string>(), rejected = ids.Select(id => new { id, reason = "unknown type" }) } : new { accepted = ids, rejected = Array.Empty<object>() };
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = JsonContent.Create(answer) };
+    }
 }
 
 sealed class FlakyStorage(IObjectStorage inner, int failures) : IObjectStorage

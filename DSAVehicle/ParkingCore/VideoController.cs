@@ -40,7 +40,8 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
         var cameras = (await db.Cameras.AsNoTracking().OrderBy(x => x.Id).ToListAsync()).Where(c => allowed is null || (c.LaneId is not null && allowed.Contains(c.LaneId))).ToList();
         return new {
             videoEnabled = VideoOptions.From(config).Enabled, cloudEnabled = CloudOptions.From(config).Enabled,
-            outboxPending = await db.Outbox.CountAsync(x => x.Status != "Sent"),
+            // Skipped = rows the platform contract has no type for (ParkingSession…): done, not waiting.
+            outboxPending = await db.Outbox.CountAsync(x => x.Status != "Sent" && x.Status != "Skipped"),
             cameras = cameras.Select(c => new { c.Id, c.Name, c.LaneId, c.Enabled, c.Record24x7, c.LastSegmentUtc, source = c.SourceProtected.Length == 0 ? "" : Mask(protector, c.SourceProtected),
                 c.ExternalDevice, c.ExternalChannel, c.TrustedConfidence, c.LastMessageUtc, c.SilentAlertSeconds, wallSource = c.WallSourceProtected is null ? "" : Mask(protector, c.WallSourceProtected),
                 pendingUploads = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Count ?? 0, oldestPendingUtc = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Oldest })
