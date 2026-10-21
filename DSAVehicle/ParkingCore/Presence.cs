@@ -190,7 +190,7 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
 
     [HttpGet("shifts")]
     public async Task<object> Shifts() => await db.Shifts.AsNoTracking().OrderBy(x => x.AreaId).ThenBy(x => x.Start).ToListAsync();
-    [HttpPut("shifts"), Authorize(Policy = Perm.ManageSite)]
+    [HttpPut("shifts"), Authorize(Policy = Perm.ManageSite), LocalMasterOnly]
     public async Task<IActionResult> SaveShift(ShiftInput input)
     {
         if (!await db.Areas.AnyAsync(x => x.Id == input.AreaId)) return Conflict(new { message = "Area not found." });
@@ -199,7 +199,7 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
         shift.AreaId = input.AreaId; shift.Name = input.Name.Trim(); shift.Start = input.Start; shift.End = input.End;
         db.Log(Actor, "SaveShift", shift.Name); await db.SaveChangesAsync(); return Ok(shift);
     }
-    [HttpDelete("shifts/{id:guid}"), Authorize(Policy = Perm.ManageSite)]
+    [HttpDelete("shifts/{id:guid}"), Authorize(Policy = Perm.ManageSite), LocalMasterOnly]
     public async Task<IActionResult> DeleteShift(Guid id)
     {
         var shift = await db.Shifts.FindAsync(id);

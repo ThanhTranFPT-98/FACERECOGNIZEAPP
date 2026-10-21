@@ -18,6 +18,8 @@ public sealed class PlatformOptions
     // The station's key, shown once when the station is created on the platform. Keep it in appsettings.Local.json.
     public string? Key { get; set; }
     public int HeartbeatSeconds { get; set; } = 60;
+    // With Sync:MasterSource = Cloud: how often the station asks for master changes (plan §4.1).
+    public int MasterPullSeconds { get; set; } = 30;
     public int BacklogAlertMinutes { get; set; } = 60;
     public static PlatformOptions From(IConfiguration config) => config.GetSection("Platform").Get<PlatformOptions>() ?? new();
     public void Validate()
@@ -227,8 +229,8 @@ public sealed class PlatformHeartbeat(IServiceScopeFactory scopes, IConfiguratio
         return new
         {
             softwareVersion = "station-" + version,
-            // Filled in once the station pulls the master list from the platform.
-            masterVersion = (long?)null,
+            // Applied master version (Sync:MasterSource = Cloud); null while the list is managed locally.
+            masterVersion = await db.SyncCursors.AsNoTracking().Where(x => x.Peer == MasterSync.Cursor).Select(x => (long?)x.LastId).FirstOrDefaultAsync(stop),
             outboxBacklog = await pending.CountAsync(stop),
             oldestPendingUtc = Utc(await pending.OrderBy(x => x.Id).Select(x => (DateTime?)x.CreatedUtc).FirstOrDefaultAsync(stop)),
             diskFreeGb = Math.Round(new DriveInfo(Path.GetPathRoot(Path.GetFullPath(contentRoot))!).AvailableFreeSpace / 1e9, 1),

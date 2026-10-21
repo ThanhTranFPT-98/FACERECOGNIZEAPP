@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using DSAVehicle.Data;
 using DSAVehicle.Models;
 using DSAVehicle.ParkingCore;
@@ -717,6 +718,109 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     finally { pevidence.Delete(true); }
 }
 
+// ---- Master list from the FPT Cloud platform (CR-017, Sync:MasterSource = Cloud) ----
+{
+    using var mconn = new SqliteConnection("Data Source=:memory:");
+    mconn.Open();
+    using var mdb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(mconn).Options);
+    mdb.Database.EnsureCreated();
+    mdb.Areas.Add(new Area { Code = "CUALO", Name = "Cửa lò" });
+    mdb.People.Add(new AuthorizedPerson { PersonId = 77, Name = "Local only" });
+    await mdb.SaveChangesAsync();
+    var cloud = new FakePlatform();
+    var mhttp = new HttpClient(cloud) { BaseAddress = new Uri("http://platform.test/") };
+    var moptions = new PlatformOptions { Enabled = true, Url = "http://platform.test", StationId = "CUALO-GC", Key = new string('k', 40) };
+    var webJson = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+    object P(int id, string name, params string[] pins) => new { id, code = $"CN-{id:D2}", name, unit = "PX3", active = true, validUntil = (DateTime?)null,
+        areaCodes = new[] { "CUALO" }, faceIds = pins.Select(pin => new { source = "zk-face-s", externalId = pin }) };
+    object V(string plate, params int[] personIds) => new { plate, kind = "Motorbike", category = "Registered", personIds, validUntil = (DateTime?)null, blocked = false, active = true };
+    var mshifts = new object[] { new { areaCode = "CUALO", name = "Ca 1", start = "06:00", end = "14:00" }, new { areaCode = "BAIXE", name = "Ca 2", start = "14:00", end = "22:00" } };
+    string M(long version, bool full, object[] people, object[] vehicles, int[]? deletedPeople = null, string[]? deletedVehicles = null) =>
+        System.Text.Json.JsonSerializer.Serialize(new { version, full, people, vehicles, shifts = mshifts, deleted = new { people = deletedPeople ?? [], vehicles = deletedVehicles ?? [] } }, webJson);
+    T Fresh<T>(Func<ParkingDb, T> read) { mdb.ChangeTracker.Clear(); return read(mdb); }
+
+    cloud.MasterJson = M(3, true, [P(1, "Nguyễn Văn A", "1023"), P(2, "Trần Văn B", "2000")], [V("14B1-234.56", 1, 2)]);
+    Check(await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow) == 3 && cloud.MasterUrls.Last() == "/api/v1/stations/CUALO-GC/master",
+        "First pull asks for everything (no since) and applies version 3");
+    Check(Fresh(db => db.People.OrderBy(x => x.PersonId).Select(x => x.PersonId).ToList()).SequenceEqual([1, 2]) && Fresh(db => db.People.Find(1)!.Code) == "CN-01",
+        "A full list replaces the people (a local-only person goes); personId is the cloud's ID, the worker code is Code");
+    Check(AuthorizedPerson.Allowed(Fresh(db => db.People.Find(1)), DateTime.UtcNow), "A person from the cloud is allowed on person lanes");
+    Check(Fresh(db => db.PersonIdentities.Single(x => x.ExternalId == "1023").PersonId) == 1 && Fresh(db => db.PersonIdentities.Count()) == 2, "Face IDs become the station's identity mapping");
+    var mv = Fresh(db => db.Vehicles.Include(x => x.AuthorizedPeople).Single());
+    Check(mv.NormalizedPlate == "14B123456" && mv.PersonId == 1 && mv.Owner == "Nguyễn Văn A" && mv.AuthorizedPeople.Single().PersonId == 2, "Vehicle: the first person is the owner, the others share it");
+    Check(Fresh(db => db.Shifts.Select(x => x.Name).ToList()).SequenceEqual(["Ca 1"]), "Only the shifts of the station's own areas are kept");
+    Check(cloud.Acks.Count == 1 && cloud.Acks[0].GetProperty("version").GetInt64() == 3 && cloud.Acks[0].GetProperty("counts").GetProperty("people").GetInt32() == 2,
+        "Version 3 acknowledged, with counts");
+
+    cloud.MasterJson = M(3, false, [], []);
+    Check(await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow) == 3 && cloud.MasterUrls.Last().EndsWith("?since=3") && cloud.Acks.Count == 1
+        && Fresh(db => db.People.Count()) == 2, "Up to date: asks since 3, changes nothing, sends no second ack");
+
+    cloud.MasterJson = M(5, false, [P(1, "Nguyễn Văn A"), P(2, "Trần Văn Bình", "2000", "1023")], [V("14B1-234.56", 2)]);
+    await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow);
+    mv = Fresh(db => db.Vehicles.Include(x => x.AuthorizedPeople).Single());
+    Check(Fresh(db => db.PersonIdentities.Single(x => x.ExternalId == "1023").PersonId) == 2 && Fresh(db => db.People.Find(2)!.Name) == "Trần Văn Bình"
+        && mv.PersonId == 2 && mv.AuthorizedPeople.Count == 0 && cloud.Acks.Last().GetProperty("version").GetInt64() == 5, "Changes since 3: a face ID moves, a rename, a new owner");
+
+    cloud.MasterJson = M(6, false, [], [], [1], ["14B123456"]);
+    await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow);
+    Check(Fresh(db => db.People.Select(x => x.PersonId).ToList()).SequenceEqual([2]) && Fresh(db => db.Vehicles.Count()) == 0, "Deleted people and vehicles are removed");
+
+    cloud.MasterJson = M(7, false, [P(2, "x", "2000"), P(3, "y", "2000")], []);
+    var refusedList = false;
+    try { await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow); } catch (ArgumentException) { refusedList = true; }
+    Check(refusedList && Fresh(db => db.SyncCursors.Find(MasterSync.Cursor)!.LastId) == 6 && Fresh(db => db.People.Find(3)) is null && Fresh(db => db.People.Find(2)!.Name) == "Trần Văn Bình"
+        && cloud.Acks.Last().GetProperty("version").GetInt64() == 6, "A broken list (one face ID for two people) is refused as a whole: version 6 stays in force");
+
+    cloud.MasterStatus = System.Net.HttpStatusCode.ServiceUnavailable;
+    var down = false;
+    try { await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow); } catch (HttpRequestException) { down = true; }
+    Check(down && Fresh(db => db.People.Count()) == 1, "Platform down: the current list stays in use");
+    cloud.MasterStatus = System.Net.HttpStatusCode.OK;
+
+    cloud.AckStatus = System.Net.HttpStatusCode.ServiceUnavailable;
+    cloud.MasterJson = M(8, false, [P(2, "Trần Văn Bình", "2000")], []);
+    await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow);
+    var acksBefore = cloud.Acks.Count;
+    cloud.AckStatus = System.Net.HttpStatusCode.OK;
+    cloud.MasterJson = M(8, false, [], []);
+    await MasterSync.RunOnceAsync(mdb, mhttp, moptions, DateTime.UtcNow);
+    Check(Fresh(db => db.SyncCursors.Find(MasterSync.Cursor)!.LastKey) == "acked" && cloud.Acks.Count == acksBefore + 1 && cloud.Acks.Last().GetProperty("version").GetInt64() == 8,
+        "A failed acknowledgement is sent again on the next pull");
+
+    var mreport = System.Text.Json.JsonSerializer.SerializeToElement(await PlatformHeartbeat.Report(mdb, AppContext.BaseDirectory, DateTime.UtcNow), webJson);
+    Check(mreport.GetProperty("masterVersion").GetInt64() == 8, "Heartbeat reports the applied master version");
+
+    bool Locked(string? source)
+    {
+        var services = new ServiceCollection().AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Sync:MasterSource"] = source }).Build()).BuildServiceProvider();
+        var context = new Microsoft.AspNetCore.Mvc.Filters.ResourceExecutingContext(new Microsoft.AspNetCore.Mvc.ActionContext(
+            new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = services }, new Microsoft.AspNetCore.Routing.RouteData(),
+            new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor()), [], []);
+        new LocalMasterOnlyAttribute().OnResourceExecuting(context);
+        return context.Result is Microsoft.AspNetCore.Mvc.ConflictObjectResult;
+    }
+    Check(Locked("Cloud") && !Locked("Local") && !Locked(null), "Local edits of people, vehicles, face IDs and shifts are refused only while the cloud owns the list");
+
+    // Optional: pull from a running DSA_Platform (PLATFORM_E2E_URL, ...; PLATFORM_E2E_PEOPLE = people expected there).
+    if (Environment.GetEnvironmentVariable("PLATFORM_E2E_URL") is { Length: > 0 } masterUrl && int.TryParse(Environment.GetEnvironmentVariable("PLATFORM_E2E_PEOPLE"), out var expected))
+    {
+        var real = new PlatformOptions { Enabled = true, Url = masterUrl, StationId = Environment.GetEnvironmentVariable("PLATFORM_E2E_STATION"), Key = Environment.GetEnvironmentVariable("PLATFORM_E2E_KEY") };
+        var realHttp = new HttpClient { BaseAddress = new Uri(masterUrl.TrimEnd('/') + "/") };
+        realHttp.DefaultRequestHeaders.Add("X-Station-Key", real.Key);
+        using var econn = new SqliteConnection("Data Source=:memory:");
+        econn.Open();
+        using var edb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(econn).Options);
+        edb.Database.EnsureCreated();
+        edb.Areas.Add(new Area { Code = "CUALO", Name = "Cửa lò" }); await edb.SaveChangesAsync();
+        var version = await MasterSync.RunOnceAsync(edb, realHttp, real, DateTime.UtcNow);
+        edb.ChangeTracker.Clear();
+        Check(version > 0 && edb.People.Count() == expected && edb.SyncCursors.Find(MasterSync.Cursor)!.LastKey == "acked",
+            $"E2E: the station pulls version {version} with {expected} people from the real platform and acknowledges it");
+    }
+}
+
 Console.WriteLine($"{count} checks passed.");
 
 // Reads the first JSON value from text that continues with other data (an HTTP capture). Sync helper: Utf8JsonReader can't live in async code.
@@ -741,9 +845,25 @@ sealed class FakePlatform : HttpMessageHandler
     public List<(string Path, string? Sha)> Evidence { get; } = [];
     public bool Reject { get; set; }
     public System.Net.HttpStatusCode Status { get; set; } = System.Net.HttpStatusCode.OK;
+    public string MasterJson { get; set; } = "{}";
+    public List<string> MasterUrls { get; } = [];
+    public List<System.Text.Json.JsonElement> Acks { get; } = [];
+    public System.Net.HttpStatusCode MasterStatus { get; set; } = System.Net.HttpStatusCode.OK;
+    public System.Net.HttpStatusCode AckStatus { get; set; } = System.Net.HttpStatusCode.OK;
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
     {
         if (Status != System.Net.HttpStatusCode.OK) return new HttpResponseMessage(Status) { Content = new StringContent("platform down") };
+        var path = request.RequestUri!.AbsolutePath;
+        if (request.Method == HttpMethod.Get && path.EndsWith("/master"))
+        {
+            MasterUrls.Add(request.RequestUri.PathAndQuery);
+            return new HttpResponseMessage(MasterStatus) { Content = new StringContent(MasterJson, System.Text.Encoding.UTF8, "application/json") };
+        }
+        if (path.EndsWith("/master/ack"))
+        {
+            if (AckStatus == System.Net.HttpStatusCode.OK) Acks.Add(System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellation)).RootElement.Clone());
+            return new HttpResponseMessage(AckStatus);
+        }
         if (request.Method == HttpMethod.Put)
         {
             Evidence.Add((request.RequestUri!.AbsolutePath, request.Headers.TryGetValues("X-Sha256", out var sha) ? sha.Single() : null));

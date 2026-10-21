@@ -124,9 +124,9 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
     [HttpGet("audit"), Authorize(Policy = Perm.ViewAudit)]
     public async Task<object> Audit(int page = 1) => await db.Audit.AsNoTracking().OrderByDescending(x => x.Id).Skip((Math.Clamp(page, 1, 100000) - 1) * 50).Take(50).ToListAsync();
 
-    [HttpPost("vehicles"), Authorize(Policy = Perm.ManageVehicles)]
+    [HttpPost("vehicles"), Authorize(Policy = Perm.ManageVehicles), LocalMasterOnly]
     public Task<IActionResult> AddVehicle(VehicleInput input) => UpdateVehicle(null, input);
-    [HttpPut("vehicles/{id:guid}"), Authorize(Policy = Perm.ManageVehicles)]
+    [HttpPut("vehicles/{id:guid}"), Authorize(Policy = Perm.ManageVehicles), LocalMasterOnly]
     public Task<IActionResult> EditVehicle(Guid id, VehicleInput input) => UpdateVehicle(id, input);
     private async Task<IActionResult> UpdateVehicle(Guid? id, VehicleInput input) => await Mutate(async () => {
         var plate = VietnamPlate.Normalize(input.Plate);

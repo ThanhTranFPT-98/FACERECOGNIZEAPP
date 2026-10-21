@@ -751,6 +751,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-017 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.1, §5.2) | Master list from the FPT Cloud platform; personId shared with the cloud | High | Done; tested against a local DSA_Platform |
 | CR-016 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.2, §5.1, §5.3) | Station → FPT Cloud platform: events, evidence, heartbeat (dsa.station/1 draft) | High | Done; tested against a local DSA_Platform; contract still a draft |
 | CR-015 | 2026-09-29 | ThanhTranFPT-98 (Plan V2 + flexible device input) | Device profiles: configurable input for plate cameras and face devices, identity mapping, SDK connector entry point | High | Done, locally tested; no real device tried |
 | CR-014 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1, done last) | Vietnamese UI and Excel (GC-39) | High | Done for parking UI; legacy face pages still English |
@@ -779,11 +780,26 @@ Use this section for the customer's new requirements. Write an entry **before** 
   - With `Cloud:Enabled` as well, `CloudUploader` sends **video only** to S3 (records go to the platform).
 - **Acceptance criteria:** every record kind of the contract reaches the platform once per change; an outage or a rejection never loses or duplicates a record; a photo is uploaded once per decision with a verifiable hash; times are sent as UTC (`Z`), also for rows read back from SQLite.
 - **Design decision and why; alternatives rejected:** item ID per *change* instead of per record (the draft): the outbox snapshots every change, and a per-record ID would make the platform drop reviews as duplicates. A second outbox for the platform was rejected: one outbox keeps one source of truth for "not yet delivered".
-- **Risks / edge cases:** contract fields are a draft (`personId` is still the station's integer; `ppe` is sent as `ppeOutcome`/`ppeSummary`, not the draft's nested object); extra evidence images (`EvidenceImage`, overview/inspection) and `Visit` are not sent yet.
+- **Risks / edge cases:** contract fields are a draft (`personId` = the station's integer, agreed as the shared ID on 21/10, see CR-017; `ppe` is sent as `ppeOutcome`/`ppeSummary`, not the draft's nested object); extra evidence images (`EvidenceImage`, overview/inspection) and `Visit` are not sent yet.
 - **DB migration needed?** no (new outbox status values `Skipped`, `Rejected` only).
 - **Status:** Done, locally tested.
 - **Result / verification (2026-10-21):** `ParkingCore.Tests` 191 passed (14 new, against a fake platform: mapping, photo first with SHA-256 and only once, review sent as a new item, UTC times after a SQLite round trip, rejected kept and alerted, outage retried with backoff, heartbeat shape). With `PLATFORM_E2E_URL` set, the same suite ran against a real `DSA_Platform` (PostgreSQL 16.8, station created and key rotated through its admin API): every item accepted, evidence stored with matching size, heartbeat stored (`station-1.0.0`, device Online). `ParkingSimulation.Tests` 14 passed.
-- **Not done:** master pull from the platform (waits on the `personId` string/int decision, contracts/CHO_CHOT.md 1a/2b); `Visit` and `EvidenceImage` upload; upload bandwidth cap for photos.
+- **Not done:** `Visit` and `EvidenceImage` upload; upload bandwidth cap for photos. (Master pull: CR-017.)
+
+### CR-017 — Master list from the FPT Cloud platform (people, face IDs, vehicles, shifts)
+- **Date / requested by:** 2026-10-21, ThanhTranFPT-98. Station plan §4.1 ("Cloud is the master copy; the station pulls"), §5.2. Decision 21/10: **`personId` is the shared ID** of cloud and station (no extra column), issued by the cloud only.
+- **Interpretation (what we built):** `ParkingCore/Modules/Identity/Master/MasterSync.cs`, on only with `Sync:MasterSource = Cloud` (needs `Platform:Enabled`; refused at startup otherwise).
+  - Every `Platform:MasterPullSeconds` (30) the station calls `GET …/master?since=<applied version>` and applies the answer in **one transaction**: a full list replaces people, identity mapping, vehicles and shifts; a change list touches the listed and deleted entries only. Then `POST …/master/ack` with counts.
+  - Mapping: person → `AuthorizedPerson` (`PersonId` = cloud ID, `Code` = worker code); `faceIds` → `PersonIdentity` (a moved face ID is re-pointed, not deleted and re-added, because `(Source, ExternalId)` is unique); vehicle → `RegisteredVehicle` with the **first person as owner** and the others in `VehiclePeople` (the policy accepts any of them, `PolicyVehicle`); shifts → only those of the station's own areas (by area code).
+  - Applied version + acknowledgement state live in `SyncCursor` (`platform:master`), so no migration. A failed ack is resent on the next pull. The heartbeat reports the applied version.
+  - While the cloud owns the list, local edits of people, identity mapping, vehicles and shifts return 409 (`[LocalMasterOnly]`); visitors and walk-ins stay local.
+- **Acceptance criteria:** the decision path is unchanged (same `PersonId`s); a version is applied completely or not at all; a broken list or an outage leaves the previous list in force; the platform's fleet view shows the applied version.
+- **Design decision and why; alternatives rejected:** a `CloudId` column next to the station's own ID was rejected (decision 21/10): one shared ID needs no translation in either direction and makes cloud trace match station events. Pull, not push: the station is behind the site firewall.
+- **Risks / edge cases:** `areaCodes` of a person are **not enforced** on the station yet (the station has no per-person area rule today, so behaviour is unchanged); `unit` is not stored. Revocation takes effect after one pull cycle plus any network outage (must be accepted by the customer, plan §4.1). A full list removes people created locally before switching to `Cloud` (intended: the cloud is the master).
+- **DB migration needed?** no.
+- **Status:** Done, locally tested.
+- **Result / verification (2026-10-21):** `ParkingCore.Tests` 206 passed (15 new, fake platform: full list, up to date, changes, deletes, moved face ID, owner/shared vehicle, own-area shifts, broken list refused as a whole, outage, ack resent, heartbeat version, edit lock). Against a real local `DSA_Platform` (PostgreSQL 16.8) seeded with 2 people and a vehicle through its admin API: the station pulled version 2 and acknowledged it (fleet view 2/2, 0 behind), and the cloud trace by `personId=1023` shows the person's name on the events the station uploaded.
+- **Not done:** "Sync now" button; enforcing `areaCodes`; UI hint that people/vehicles are read-only in `Cloud` mode (the API already refuses).
 
 ### CR-015 — Flexible device input: device profiles, identity mapping, SDK entry point (GC-05, GC-06)
 - **Date / requested by:** 2026-09-29, ThanhTranFPT-98. "Plate cameras and face devices may change because we use other devices, so the input from them must be more flexible." Agreed design: options B (declarative profiles) + A (code adapters) in 4 layers; the user writes the vendor SDK code.

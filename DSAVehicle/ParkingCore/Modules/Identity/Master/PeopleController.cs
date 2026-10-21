@@ -19,7 +19,7 @@ public class PeopleController(ParkingDb db) : ControllerBase
 {
     [HttpGet]
     public async Task<object> List() => await db.People.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
-    [HttpPut, Authorize(Policy = Perm.ManagePeople)]
+    [HttpPut, Authorize(Policy = Perm.ManagePeople), LocalMasterOnly]
     public async Task<object> Save(PersonInput input)
     {
         var person = await db.People.FindAsync(input.PersonId);

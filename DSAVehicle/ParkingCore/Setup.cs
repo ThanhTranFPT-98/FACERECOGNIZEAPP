@@ -21,6 +21,8 @@ public static class ParkingSetup
         var cloud = CloudOptions.From(builder.Configuration);
         var video = VideoOptions.From(builder.Configuration);
         var platform = PlatformOptions.From(builder.Configuration);
+        var cloudMaster = MasterSource.FromCloud(builder.Configuration);
+        if (cloudMaster && !platform.Enabled) throw new InvalidOperationException("Sync:MasterSource = Cloud needs Platform:Enabled (and its Url, StationId, Key).");
         // The outbox is only filled while cloud sync is enabled, so a site without cloud storage does not accumulate unsent rows.
         void Outbox(DbContextOptionsBuilder options) { if (cloud.Enabled || platform.Enabled) options.AddInterceptors(new SyncOutboxInterceptor()); }
         if (builder.Configuration["Parking:Provider"] == "SqlServer")
@@ -47,6 +49,7 @@ public static class ParkingSetup
             });
             builder.Services.AddHostedService<PlatformUploader>();
             builder.Services.AddHostedService<PlatformHeartbeat>();
+            if (cloudMaster) builder.Services.AddHostedService<MasterSync>();
         }
         if (video.Enabled) builder.Services.AddHostedService<VideoRecorderSupervisor>();
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

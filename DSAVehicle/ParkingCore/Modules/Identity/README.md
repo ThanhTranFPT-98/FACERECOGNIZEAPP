@@ -27,7 +27,7 @@ thiết bị ─► ① Inbox/      lưu CameraInbox TRƯỚC khi ACK (chống t
 | `Adapters/Profiles/` | Hồ sơ thiết bị (CR-015): `DeviceProfile`, `ProfileAdapter`, `ProfilePath`, `ProfileCache`, `DeviceProfilesController` |
 | `Resolve/` | `PersonIdentity`, `PersonIdentitiesController` |
 | `Plates/` | `VietnamPlate`, `PlateRules` |
-| `Master/` | `AuthorizedPerson`, `PeopleController`, `RegisteredVehicle` + `VehiclePerson`, `Visit` |
+| `Master/` | `AuthorizedPerson`, `PeopleController`, `RegisteredVehicle` + `VehiclePerson`, `Visit`; `MasterSync` (kéo danh sách từ FPT Cloud khi `Sync:MasterSource = Cloud`, CR-017), `LocalMasterOnly` (khoá sửa tại trạm khi đó) |
 
 Chi tiết cho người tích hợp thiết bị: [`docs/DEVICE_INPUT.md`](../../../../docs/DEVICE_INPUT.md).
 

@@ -21,7 +21,7 @@ public class PersonIdentitiesController(ParkingDb db, CameraAdapters builtIn) : 
     public async Task<object> List([FromQuery] string? source) =>
         await db.PersonIdentities.AsNoTracking().Where(x => source == null || x.Source == source).OrderBy(x => x.Source).ThenBy(x => x.ExternalId).Take(5000).ToListAsync();
 
-    [HttpPut]
+    [HttpPut, LocalMasterOnly]
     public async Task<IActionResult> Save(PersonIdentityInput input)
     {
         if (await Invalid(input.Source) is { } refused) return refused;
@@ -32,7 +32,7 @@ public class PersonIdentitiesController(ParkingDb db, CameraAdapters builtIn) : 
     }
 
     // Bulk import (e.g. the export of a face terminal's user list), one audit entry.
-    [HttpPost("import")]
+    [HttpPost("import"), LocalMasterOnly]
     public async Task<IActionResult> Import(List<PersonIdentityInput> rows)
     {
         if (rows.Count is 0 or > 5000) return BadRequest(new { message = "Send 1–5000 rows." });
@@ -45,7 +45,7 @@ public class PersonIdentitiesController(ParkingDb db, CameraAdapters builtIn) : 
         return Ok(new { imported = rows.Count });
     }
 
-    [HttpDelete("{id:long}")]
+    [HttpDelete("{id:long}"), LocalMasterOnly]
     public async Task<IActionResult> Delete(long id)
     {
         var row = await db.PersonIdentities.FindAsync(id);
