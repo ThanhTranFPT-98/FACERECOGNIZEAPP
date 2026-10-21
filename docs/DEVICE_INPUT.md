@@ -1,6 +1,6 @@
 # Đầu vào thiết bị linh hoạt: hồ sơ thiết bị, ánh xạ danh tính, SDK connector
 
-Ngày: 29/09/2026 · CR-015 · Mã nguồn: `DSAVehicle/ParkingCore/DeviceProfiles.cs`, `Receiver.cs` · UI: tab **Nguồn thiết bị**.
+Ngày: 29/09/2026 · CR-015 · Mã nguồn: `DSAVehicle/ParkingCore/Modules/Identity/` (`Inbox/`, `Adapters/`, `Adapters/Profiles/`, `Resolve/`) · UI: tab **Nguồn thiết bị**.
 
 Tài liệu này dành cho người tích hợp thiết bị mới (camera biển số, thiết bị nhận diện khuôn mặt) và người viết SDK connector.
 

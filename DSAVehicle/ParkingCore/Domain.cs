@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace DSAVehicle.ParkingCore;
@@ -12,40 +11,6 @@ public class ParkingUser
     public string Role { get; set; } = "Guard";
     public bool Active { get; set; } = true;
     public DateTime? ExpiresUtc { get; set; }
-}
-public class RegisteredVehicle
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public string Plate { get; set; } = "";
-    [MaxLength(32)] public string NormalizedPlate { get; set; } = "";
-    public string Kind { get; set; } = "Motorcycle";
-    public string Owner { get; set; } = "";
-    public int? PersonId { get; set; }
-    public bool Active { get; set; } = true;
-    public bool Blocked { get; set; }
-    // GC-15: Registered | Guest | Delivery. Categories listed in SiteSettings.ReviewCategories always go to the guard.
-    [MaxLength(20)] public string Category { get; set; } = "Registered";
-    public DateTime? ValidUntilUtc { get; set; }
-    public ICollection<VehiclePerson> AuthorizedPeople { get; set; } = new List<VehiclePerson>();
-}
-public class VehiclePerson
-{
-    public Guid VehicleId { get; set; }
-    public int PersonId { get; set; }
-}
-public class Visit
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public string Name { get; set; } = "";
-    public string Host { get; set; } = "";
-    public string Plate { get; set; } = "";
-    public DateTime FromUtc { get; set; }
-    public DateTime UntilUtc { get; set; }
-    public int MaxEntries { get; set; } = 1;
-    public int Entries { get; set; }
-    public bool Revoked { get; set; }
-    // Visit = planned visitor; WalkIn = registered by a guard at the gate, ends at the next day start (GC-16).
-    [MaxLength(20)] public string Kind { get; set; } = "Visit";
 }
 // Site hierarchy (GC-01): Area → Location → Lane → Camera. Every lane belongs to a location once the site is initialised.
 public class Area
@@ -304,40 +269,7 @@ public class ParkingDb : DbContext
     }
     public void Log(string actor, string action, object target) => Audit.Add(new() { Actor = actor, Action = action, Target = target.ToString() ?? "" });
 }
-public static class VietnamPlate
-{
-    // Covers common civilian layouts; special/diplomatic/military formats require review.
-    public static string Normalize(string value) => Regex.Replace(value.ToUpperInvariant(), @"[\s.\-]", "");
-    public static bool CommonFormat(string value) => Regex.IsMatch(value, @"^[0-9]{2}[A-Z]{1,2}[0-9]{4,6}$");
-}
-// Site plate formats (GC-43). Patterns are anchored and time-limited, so an admin's regex can't hang a decision.
-public sealed class PlateRules
-{
-    private static readonly TimeSpan Limit = TimeSpan.FromMilliseconds(50);
-    private readonly Regex[] patterns;
-    public static readonly PlateRules Default = new("");
-    public PlateRules(string patterns) => this.patterns = Lines(patterns).Select(p => new Regex("^(?:" + p + ")$", RegexOptions.CultureInvariant, Limit)).ToArray();
-    public bool Custom => patterns.Length > 0;
-    public bool Valid(string normalizedPlate)
-    {
-        if (!Custom) return VietnamPlate.CommonFormat(normalizedPlate);
-        try { return patterns.Any(p => p.IsMatch(normalizedPlate)); }
-        catch (RegexMatchTimeoutException) { return false; }
-    }
-    // Returns an error message, or null when every line is a usable pattern.
-    public static string? Check(string patterns)
-    {
-        foreach (var line in Lines(patterns))
-        {
-            try { _ = new Regex("^(?:" + line + ")$", RegexOptions.CultureInvariant, Limit); }
-            catch (ArgumentException ex) { return "Invalid pattern '" + line + "': " + ex.Message; }
-        }
-        return null;
-    }
-    private static IEnumerable<string> Lines(string patterns) => patterns.Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0);
-}
 public class ParkingSqlServerDb(DbContextOptions<ParkingSqlServerDb> options) : ParkingDb(options) { }
-public record Recognition(string Plate, double PlateConfidence, int? PersonId, double FaceConfidence, string ModelVersion);
 public record PolicyResult(string Outcome, string Reason);
 public static class AccessPolicy
 {

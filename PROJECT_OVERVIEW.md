@@ -307,7 +307,7 @@ flowchart LR
 ```text
 Presentation   ui/src/pages/Parking/Parking.jsx (tabs), AuthContext, MainLayout
 API            ParkingCore/ParkingController.cs, Security.cs (auth endpoints)
-Domain logic   ParkingCore/ParkingService.cs, Domain.cs (AccessPolicy, VietnamPlate)
+Domain logic   ParkingCore/ParkingService.cs, Domain.cs (AccessPolicy), Modules/Identity/Plates (VietnamPlate)
 Persistence    ParkingCore/Domain.cs (ParkingDb, EF Core), Migrations + SqlServerMigrations
 Background     ParkingCore/Maintenance.cs (offline alerts, retention, webhook)
 AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane_worker.py
@@ -320,6 +320,7 @@ AI services    AiService/plate_service.py, AiService/app/main.py, AiService/lane
 | Web UI | `ui/` | React 18, Vite 8, Ant Design, axios, SignalR | 5173 | Vite proxies `/api`, `/parkingHub`, `/notificationHub` to 5085 |
 | API | `DSAVehicle/` | ASP.NET Core 8, EF Core, SignalR | 5085 | Entry: `Program.cs` → `builder.AddParking()` in `ParkingCore/Setup.cs` |
 | Parking core | `DSAVehicle/ParkingCore/` | C# | — | All parking logic lives here |
+| M1 Identity (FaceID, plates) | `DSAVehicle/ParkingCore/Modules/Identity/` | C# | — | Receiver, inbox, adapters, device profiles, identity mapping, plate rules, people/vehicles. Output to M3 only through `ParkingCore/Contracts/Recognition.cs`. See its `README.md` |
 | Old simulation | `DSAVehicle/Parking/ParkingSimulation.cs` | C# | — | In-memory demo, kept only for its tests |
 | Legacy face backend | `DSAVehicle/Controllers`, `Services`, `Repository`, `Models` | C# + SQL Server | — | Employees/strangers/access logs. Admin only |
 | Plate OCR | `AiService/plate_service.py` | FastAPI, OpenCV, Tesseract | 8001 | Baseline, **uncalibrated** (`calibrated: false`) |

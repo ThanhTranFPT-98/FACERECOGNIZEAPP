@@ -1,23 +1,7 @@
 using System.Collections.Concurrent;
-using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace DSAVehicle.ParkingCore;
-
-// People allowed through person lanes (GC-10), e.g. mine-shaft flap gates. PersonId is the ID the face source reports
-// (our face DB, or the PIN of a ZKTeco terminal) — one ID space per site.
-public class AuthorizedPerson
-{
-    public int PersonId { get; set; }
-    [MaxLength(100)] public string Name { get; set; } = "";
-    [MaxLength(40)] public string? Code { get; set; }
-    public bool Active { get; set; } = true;
-    public DateTime? ValidUntilUtc { get; set; }
-    public static bool Allowed(AuthorizedPerson? person, DateTime now) => person is { Active: true } && (person.ValidUntilUtc is null || person.ValidUntilUtc > now);
-}
 
 // ---- PPE (Plan V2 §3.9) ----
 // One reading from a PPE camera for a lane's ROI: how many people, and which items were seen (true) or missing (false).
@@ -96,30 +80,5 @@ public static class PpeMessage
             yield return (T1550Adapter.Normalize(T1550Adapter.Str(x, "deviceId")), T1550Adapter.Str(x, "channel"),
                 new PpeReading(at, x.TryGetProperty("peopleInRoi", out var n) && n.TryGetInt32(out var people) ? people : -1, items));
         }
-    }
-}
-
-public class PersonInput
-{
-    [Range(1, int.MaxValue)] public int PersonId { get; set; }
-    [Required, StringLength(100)] public string Name { get; set; } = "";
-    [StringLength(40)] public string? Code { get; set; }
-    public bool Active { get; set; } = true;
-    public DateTimeOffset? ValidUntilUtc { get; set; }
-}
-
-[ApiController, Route("api/v1/parking/people"), Authorize(Policy = Perm.ViewLive)]
-public class PeopleController(ParkingDb db) : ControllerBase
-{
-    [HttpGet]
-    public async Task<object> List() => await db.People.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
-    [HttpPut, Authorize(Policy = Perm.ManagePeople)]
-    public async Task<object> Save(PersonInput input)
-    {
-        var person = await db.People.FindAsync(input.PersonId);
-        if (person is null) { person = new AuthorizedPerson { PersonId = input.PersonId }; db.People.Add(person); }
-        person.Name = input.Name.Trim(); person.Code = input.Code?.Trim(); person.Active = input.Active; person.ValidUntilUtc = input.ValidUntilUtc?.UtcDateTime;
-        db.Log(User.Identity?.Name ?? "unknown", "SavePerson:" + (person.Active ? "active" : "inactive"), person.PersonId);
-        await db.SaveChangesAsync(); return person;
     }
 }
