@@ -18,6 +18,7 @@ public class CameraInput
     public bool Record24x7 { get; set; } = true;
     [StringLength(40)] public string? ExternalDevice { get; set; }
     [StringLength(20)] public string? ExternalChannel { get; set; }
+    [StringLength(40)] public string? ExternalRoi { get; set; }
     [Range(0.01, 1)] public double? TrustedConfidence { get; set; }
     [StringLength(500)] public string? WallSource { get; set; }
     [Range(30, 86400)] public int? SilentAlertSeconds { get; set; }
@@ -43,7 +44,7 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
             // Skipped = rows the platform contract has no type for (ParkingSession…): done, not waiting.
             outboxPending = await db.Outbox.CountAsync(x => x.Status != "Sent" && x.Status != "Skipped"),
             cameras = cameras.Select(c => new { c.Id, c.Name, c.LaneId, c.Enabled, c.Record24x7, c.LastSegmentUtc, source = c.SourceProtected.Length == 0 ? "" : Mask(protector, c.SourceProtected),
-                c.ExternalDevice, c.ExternalChannel, c.TrustedConfidence, c.LastMessageUtc, c.SilentAlertSeconds, wallSource = c.WallSourceProtected is null ? "" : Mask(protector, c.WallSourceProtected),
+                c.ExternalDevice, c.ExternalChannel, c.ExternalRoi, c.TrustedConfidence, c.LastMessageUtc, c.SilentAlertSeconds, wallSource = c.WallSourceProtected is null ? "" : Mask(protector, c.WallSourceProtected),
                 pendingUploads = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Count ?? 0, oldestPendingUtc = pending.FirstOrDefault(p => p.CameraId == c.Id)?.Oldest })
         };
     }
@@ -66,6 +67,7 @@ public class VideoController(ParkingDb db, IDataProtectionProvider protection, I
         if (camera is null) { camera = new Camera { Id = input.Id, Record24x7 = false }; db.Cameras.Add(camera); }
         camera.ExternalDevice = string.IsNullOrWhiteSpace(input.ExternalDevice) ? null : T1550Adapter.Normalize(input.ExternalDevice);
         camera.ExternalChannel = string.IsNullOrWhiteSpace(input.ExternalChannel) ? null : input.ExternalChannel.Trim();
+        camera.ExternalRoi = string.IsNullOrWhiteSpace(input.ExternalRoi) ? null : input.ExternalRoi.Trim();
         camera.TrustedConfidence = input.TrustedConfidence; camera.SilentAlertSeconds = input.SilentAlertSeconds;
         if (!string.IsNullOrWhiteSpace(input.WallSource))
         {

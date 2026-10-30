@@ -77,6 +77,10 @@ namespace DSAVehicle.ParkingCore.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PpeTrackId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -210,6 +214,10 @@ namespace DSAVehicle.ParkingCore.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExternalDevice")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalRoi")
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 

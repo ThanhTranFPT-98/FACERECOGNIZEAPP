@@ -124,6 +124,8 @@ public class AccessEvent
     [MaxLength(60)] public string? Shift { get; set; }
     [MaxLength(20)] public string? PpeOutcome { get; set; }
     [MaxLength(300)] public string? PpeSummary { get; set; }
+    // CR-018: the AI box's track of the person the PPE verdict was made for. Open() checks the same track is still in the ROI.
+    [MaxLength(64)] public string? PpeTrackId { get; set; }
     public DateTime ExpiresUtc { get; set; }
     public string? ReviewBy { get; set; }
     public string? ReviewNote { get; set; }

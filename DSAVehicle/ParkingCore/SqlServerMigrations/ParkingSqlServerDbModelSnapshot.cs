@@ -82,6 +82,10 @@ namespace DSAVehicle.ParkingCore.SqlServerMigrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<string>("PpeTrackId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -217,6 +221,10 @@ namespace DSAVehicle.ParkingCore.SqlServerMigrations
                         .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("ExternalDevice")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ExternalRoi")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 

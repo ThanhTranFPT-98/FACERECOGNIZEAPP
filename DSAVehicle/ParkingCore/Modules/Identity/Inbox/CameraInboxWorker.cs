@@ -42,14 +42,15 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
                 {
                     var cache = services.GetRequiredService<PpeCache>();
                     var readings = 0;
-                    foreach (var (device, channel, reading) in PpeMessage.Parse(document.RootElement, item.ReceivedUtc))
+                    foreach (var (device, channel, roi, reading) in PpeMessage.Parse(document.RootElement, item.ReceivedUtc))
                     {
-                        var ppeCamera = await db.Cameras.SingleOrDefaultAsync(x => x.ExternalDevice == device && (x.ExternalChannel == null || x.ExternalChannel == "" || x.ExternalChannel == channel), stop);
+                        var candidates = await db.Cameras.Where(x => x.ExternalDevice == device && (x.ExternalChannel == null || x.ExternalChannel == "" || x.ExternalChannel == channel)).OrderBy(x => x.Id).ToListAsync(stop);
+                        var ppeCamera = PpeMessage.CameraFor(candidates, roi);
                         if (ppeCamera?.LaneId is null) continue;
                         ppeCamera.LastMessageUtc = now; cache.Record(ppeCamera.LaneId, reading); readings++;
                     }
                     item.Observations = readings; item.Status = readings > 0 ? "Processed" : "Ignored";
-                    item.Error = readings > 0 ? null : "PPE message from an unmapped device";
+                    item.Error = readings > 0 ? null : "PPE message from an unmapped device or ROI";
                     item.ProcessedUtc = now; await db.SaveChangesAsync(stop);
                     continue;
                 }

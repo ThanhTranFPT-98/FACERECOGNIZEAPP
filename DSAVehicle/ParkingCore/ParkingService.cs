@@ -45,12 +45,12 @@ public sealed class ParkingService(ParkingDb db, ParkingLock mutex, IConfigurati
                 else if (openSession?.EntryPersonId is int driver && recognition.PersonId is int leaving && leaving != driver) result = new("ManualReview", "EXIT_PERSON_MISMATCH");
             }
             // PPE (Plan V2 §3.9) can only tighten an Allow: never turn a review or deny into an opening.
-            string? ppeOutcome = null, ppeSummary = null, ppeWarning = null;
+            string? ppeOutcome = null, ppeSummary = null, ppeWarning = null, ppeTrack = null;
             if (lane.Direction == "Entry" && !string.IsNullOrWhiteSpace(lane.PpeRules))
             {
                 var site = await db.Site();
                 var verdict = PpeRules.Decide(ppe.Recent(lane.Id), PpeRules.Parse(lane.PpeRules), now, TimeSpan.FromSeconds(site.PpeWindowSeconds), site.PpeConfirmCount, lane.PpeMissingMode);
-                ppeOutcome = verdict.Outcome; ppeSummary = verdict.Summary;
+                ppeOutcome = verdict.Outcome; ppeSummary = verdict.Summary; ppeTrack = verdict.TrackId;
                 if (result.Outcome == "Allow")
                 {
                     if (verdict.Outcome == "Deny") result = new("Deny", verdict.Reason);
@@ -64,7 +64,7 @@ public sealed class ParkingService(ParkingDb db, ParkingLock mutex, IConfigurati
                 PlateConfidence = recognition.PlateConfidence, PersonId = recognition.PersonId, FaceConfidence = recognition.FaceConfidence,
                 ModelVersion = recognition.ModelVersion, Source = source, EvidenceId = evidenceId, Outcome = result.Outcome, Reason = result.Reason,
                 VisitId = vehicle is null && lane.Direction == "Entry" ? visit?.Id : null, ExpiresUtc = now + (await db.Timings(lane)).DecisionValid,
-                ReceivedUtc = receivedUtc ?? now, CapturedUtc = capturedUtc, CreatedUtc = now, PpeOutcome = ppeOutcome, PpeSummary = ppeSummary, Shift = shiftName };
+                ReceivedUtc = receivedUtc ?? now, CapturedUtc = capturedUtc, CreatedUtc = now, PpeOutcome = ppeOutcome, PpeSummary = ppeSummary, PpeTrackId = ppeTrack, Shift = shiftName };
             db.Events.Add(entry);
             if (result.Outcome != "Allow") db.Alerts.Add(new() { EventId = entry.Id, Reason = result.Reason, Severity = result.Outcome == "Deny" ? "High" : "Medium" });
             if (ppeWarning is not null) db.Alerts.Add(new() { EventId = entry.Id, Reason = ppeWarning, Severity = "Medium" });
@@ -129,6 +129,18 @@ public sealed class ParkingService(ParkingDb db, ParkingLock mutex, IConfigurati
                 var inside = lane.Direction == "Exit" && await db.Sessions.AnyAsync(x => x.Plate == entry.Plate && x.ExitUtc == null);
                 var current = AccessPolicy.Evaluate(lane, new(entry.Plate, entry.PlateConfidence, entry.PersonId, entry.FaceConfidence, entry.ModelVersion), lane.Subject == "Person" ? null : await PolicyVehicle(vehicle, entry.PersonId), visit is not null || inside, faceAuthorized, await db.PlateRules(), now);
                 if (current.Outcome != "Allow") throw new InvalidOperationException("Authorization changed; capture a new observation.");
+            }
+            // CR-018 (station plan §4.4): an automatic opening is only for the person the PPE verdict was made for. If the ROI now holds nobody,
+            // several people or another track, nothing opens: the event goes to the guard as TRACK_CHANGED and the person must be read again.
+            if (automatic && entry.ReviewBy is null && entry.PpeTrackId is { Length: > 0 } track
+                && !PpeRules.SameTrack(ppe.Recent(lane.Id), track, now, TimeSpan.FromSeconds((await db.Site()).PpeWindowSeconds)))
+            {
+                entry.Outcome = "ManualReview"; entry.Reason = "TRACK_CHANGED";
+                db.Alerts.Add(new() { EventId = id, Reason = "TRACK_CHANGED", Severity = "Medium" });
+                db.Log(actor, "TrackChanged", id);
+                await db.SaveChangesAsync();
+                await hub.Clients.All.SendAsync("ParkingChanged", new { eventId = id });
+                throw new InvalidOperationException("TRACK_CHANGED: the person in the ROI is no longer the one that was checked.");
             }
             if (!lane.Simulation)
             {

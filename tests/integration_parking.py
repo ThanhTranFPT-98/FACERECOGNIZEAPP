@@ -530,6 +530,57 @@ class ParkingIntegration(unittest.TestCase):
         self.assertEqual(decision(99)['outcome'], 'ManualReview')
         print('Verified person lane: face terminal via generic adapter, access list, PPE ok/deny/ROI review.')
 
+    def test_ppe_by_roi_and_track(self):
+        # CR-018 (station plan §4.4, §5.4): one AI box, two ROIs → two lanes; a verdict counts only the readings of its own track.
+        root = '/api/v1/parking'
+        key = secrets.token_urlsafe(32)
+        self.env['Receiver__Key'] = key
+        self.process.terminate(); self.process.wait(timeout=10); self.start()
+        self.login_as('admin')
+        for lane_id in ['roi-a', 'roi-b']:
+            lane = {'id': lane_id, 'direction': 'Entry', 'policy': 'FaceOnly', 'plateThreshold': .9, 'faceThreshold': .8, 'shadowMode': True,
+                    'simulation': True, 'subject': 'Person', 'ppeRules': 'helmet=required', 'ppeMissingMode': 'Review'}
+            self.assertEqual(self.call('PUT', root + '/lanes', lane)[0], 200)
+        for cam, device, roi, lane_id in [('face-a', 'ZK-A', None, 'roi-a'), ('face-b', 'ZK-B', None, 'roi-b'),
+                                          ('ppe-a', 'AIBOX-1', 'L1', 'roi-a'), ('ppe-b', 'AIBOX-1', 'L2', 'roi-b')]:
+            body = {'id': cam, 'name': cam, 'laneId': lane_id, 'externalDevice': device, 'trustedConfidence': .99}
+            if roi: body['externalRoi'] = roi
+            self.assertEqual(self.call('PUT', root + '/cameras', body)[0], 200)
+        for person in [7, 8]:
+            self.assertEqual(self.call('PUT', root + '/people', {'personId': person, 'name': f'Worker {person}'})[0], 200)
+        frames = iter(range(1, 1000))
+        def ppe(l1, l2):   # each side: None = empty ROI, else (trackId, helmet)
+            def roi(roi_id, side): return {'roiId': roi_id, 'tracks': [] if side is None else [{'trackId': side[0], 'items': {'helmet': side[1]}}]}
+            return self.post_raw(f'{self.base}{root}/receiver/ppe?key={key}', {'deviceId': 'AIBOX-1', 'channel': '1', 'frame': next(frames), 'rois': [roi('L1', l1), roi('L2', l2)]})
+        # 'seq' keeps repeated reads of the same person from being dropped as retries (identical bodies are stored once).
+        face = lambda device, person: self.post_raw(f'{self.base}{root}/receiver/generic?key={key}', {'deviceId': device, 'personId': person, 'confidence': .97, 'seq': next(frames)})
+        def decision(person, count=1):   # the newest event of this person, once there are `count` of them
+            for _ in range(80):
+                events = [e for e in self.call('GET', root + '/snapshot')[1]['events'] if e['personId'] == person]
+                if len(events) >= count: return max(events, key=lambda e: e['createdUtc'])
+                time.sleep(.1)
+            self.fail(f'event {count} for person {person} did not arrive')
+        # Lane A's person is dressed; lane B's is not. The same message carries both, each reaches its own lane.
+        ppe(('t-1', True), ('t-9', False)); face('ZK-A', 7)
+        first = decision(7)
+        self.assertEqual((first['outcome'], first['ppeOutcome'], first['ppeTrackId']), ('Allow', 'Ok', 't-1'))
+        face('ZK-B', 8)
+        second = decision(8)
+        self.assertEqual((second['outcome'], second['reason'], second['ppeTrackId']), ('ManualReview', 'PPE_UNCONFIRMED:helmet', 't-9'))
+        # A different person (new track) with no helmet starts counting from zero: still only a review, not a deny.
+        ppe(('t-1', True), ('t-10', False)); face('ZK-B', 8)
+        third = decision(8, 2)
+        self.assertEqual((third['outcome'], third['reason'], third['ppeTrackId']), ('ManualReview', 'PPE_UNCONFIRMED:helmet', 't-10'))
+        # The same track seen without a helmet a second time is a deny.
+        ppe(('t-1', True), ('t-10', False)); face('ZK-B', 8)
+        fourth = decision(8, 3)
+        self.assertEqual((fourth['outcome'], fourth['reason']), ('Deny', 'PPE_MISSING:helmet'))
+        # Nobody in the ROI at all: the reading is stored, the verdict has no track to speak of.
+        ppe(('t-1', True), None); face('ZK-B', 8)
+        fifth = decision(8, 4)
+        self.assertEqual((fifth['outcome'], fifth['reason']), ('ManualReview', 'PPE_ROI_NOT_SINGLE'))
+        print('Verified PPE by ROI and track: two lanes from one AI box, per-track confirmations, empty ROI.')
+
     def test_gate_operations(self):
         root = '/api/v1/parking'
         self.login_as('admin')

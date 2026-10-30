@@ -170,6 +170,7 @@ export default function Parking() {
       {field('source', 'Stream URL (rtsp://user:password@ip/…) — leave empty to keep the saved one', <Input.Password autoComplete="off" />, false)}
       <Typography.Text type="secondary">AI camera results (third-party): the device sends to /api/v1/parking/receiver/&lt;adapter&gt;?key=… or to the receiver port.</Typography.Text>
       <Space wrap>{field('externalDevice', 'AI device ID (MAC, e.g. 38-24-F1-0E-80-F8)', <Input maxLength={40} />, false)}{field('externalChannel', 'Channel (e.g. CH1)', <Input maxLength={20} />, false)}
+        {field('externalRoi', 'ROI of this lane (PPE camera covering several lanes, e.g. L3)', <Input maxLength={40} />, false)}
         {field('trustedConfidence', 'Trusted confidence (empty = always guard review)', <InputNumber min={0.01} max={1} step={0.01} />, false)}
         {field('silentAlertSeconds', 'Alert if the AI device is silent for (s, empty = off)', <InputNumber min={30} max={86400} />, false)}</Space>
       {field('wallSource', 'Video wall sub-stream (rtsp://…, optional; empty keeps the saved one)', <Input.Password autoComplete="off" />, false)}
@@ -178,7 +179,7 @@ export default function Parking() {
       <Space><Button type="primary" htmlType="submit" loading={busy}>{t('Save camera')}</Button><Button onClick={() => cameraForm.resetFields()}>{t('Clear form')}</Button></Space>
     </Form>}
     <Button style={{ marginTop: 16 }} onClick={loadCameras}>{t('Refresh cameras')}</Button>
-    {table(cameras?.cameras || [], [...cols(['id', 'name', 'laneId', 'source', 'wallSource', 'silentAlertSeconds', 'externalDevice', 'externalChannel', 'trustedConfidence', 'lastMessageUtc', 'enabled', 'record24x7', 'lastSegmentUtc', 'pendingUploads', 'oldestPendingUtc']),
+    {table(cameras?.cameras || [], [...cols(['id', 'name', 'laneId', 'source', 'wallSource', 'silentAlertSeconds', 'externalDevice', 'externalChannel', 'externalRoi', 'trustedConfidence', 'lastMessageUtc', 'enabled', 'record24x7', 'lastSegmentUtc', 'pendingUploads', 'oldestPendingUtc']),
       ...(can('ManageSite') ? [{ title: t('Edit'), render: (_, c) => <Button onClick={() => cameraForm.setFieldsValue({ ...c, source: '', wallSource: '' })}>{t('Edit')}</Button> }] : [])])}</>
   // GC-25/26: severity colours, lifecycle actions; a sound plays when a new High/Critical alert arrives.
   const severityColor = s => ({ Critical: 'red', High: 'volcano', Medium: 'gold' }[s] || 'default')

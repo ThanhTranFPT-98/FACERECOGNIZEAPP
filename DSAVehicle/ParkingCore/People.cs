@@ -5,8 +5,9 @@ namespace DSAVehicle.ParkingCore;
 
 // ---- PPE (Plan V2 §3.9) ----
 // One reading from a PPE camera for a lane's ROI: how many people, and which items were seen (true) or missing (false).
-public sealed record PpeReading(DateTime AtUtc, int PeopleInRoi, IReadOnlyDictionary<string, bool> Items);
-public sealed record PpeVerdict(string Outcome, string Reason, string Summary);   // Outcome: Ok | Warn | Deny | Review
+// TrackId (CR-018, station plan §4.4) names the one person the AI box follows in the ROI; null for cameras that don't track.
+public sealed record PpeReading(DateTime AtUtc, int PeopleInRoi, IReadOnlyDictionary<string, bool> Items, string? TrackId = null);
+public sealed record PpeVerdict(string Outcome, string Reason, string Summary, string? TrackId = null);   // Outcome: Ok | Warn | Deny | Review
 
 public static class PpeRules
 {
@@ -30,6 +31,8 @@ public static class PpeRules
         var latest = recent[^1];
         // O2: the PPE result can only belong to the face just read when exactly one person is in the ROI.
         if (latest.PeopleInRoi != 1) return new("Review", "PPE_ROI_NOT_SINGLE", latest.PeopleInRoi + " people in ROI");
+        // CR-018: readings of another track are another person's. They never count toward this person's confirmations.
+        if (latest.TrackId is not null) recent = recent.Where(r => r.TrackId == latest.TrackId).ToList();
         var missingRequired = new List<string>(); var unconfirmed = new List<string>(); var warnings = new List<string>();
         foreach (var (item, mode) in rules.Where(x => x.Value != "ignore"))
         {
@@ -42,10 +45,18 @@ public static class PpeRules
             else warnings.Add(item);
         }
         var summary = string.Join(", ", latest.Items.Select(x => x.Key + (x.Value ? " ✓" : " ✗")));
-        if (missingRequired.Count > 0) return new("Deny", "PPE_MISSING:" + string.Join("+", missingRequired), summary);
-        if (unconfirmed.Count > 0) return new("Review", "PPE_UNCONFIRMED:" + string.Join("+", unconfirmed), summary);
-        if (warnings.Count > 0) return new("Warn", "PPE_WARNING:" + string.Join("+", warnings), summary);
-        return new("Ok", "PPE_OK", summary);
+        if (missingRequired.Count > 0) return new("Deny", "PPE_MISSING:" + string.Join("+", missingRequired), summary, latest.TrackId);
+        if (unconfirmed.Count > 0) return new("Review", "PPE_UNCONFIRMED:" + string.Join("+", unconfirmed), summary, latest.TrackId);
+        if (warnings.Count > 0) return new("Warn", "PPE_WARNING:" + string.Join("+", warnings), summary, latest.TrackId);
+        return new("Ok", "PPE_OK", summary, latest.TrackId);
+    }
+
+    // CR-018: just before a barrier opens, is the person the decision was made for still the only one in the ROI?
+    // False when the ROI is empty or crowded, the AI box follows another track, or the camera went quiet for longer than the window.
+    public static bool SameTrack(IReadOnlyList<PpeReading> readings, string trackId, DateTime now, TimeSpan window)
+    {
+        var latest = readings.Where(r => (now - r.AtUtc).Duration() <= window).OrderBy(r => r.AtUtc).LastOrDefault();
+        return latest is { PeopleInRoi: 1 } && latest.TrackId == trackId;
     }
 }
 
@@ -65,20 +76,48 @@ public sealed class PpeCache
     }
 }
 
-// PPE camera message (common JSON): {"deviceId","channel","peopleInRoi":1,"items":{"helmet":true,"boots":false},"capturedUtc"?}
+// PPE camera message. Two shapes, both accepted:
+//  - flat (CR-008, one camera ↔ one lane): {"deviceId","channel","peopleInRoi":1,"items":{"helmet":true,"boots":false},"capturedUtc"?}
+//  - by ROI and track (CR-018, station plan §5.4, one camera may serve several lanes):
+//    {"deviceId","channel","frame":88213,"capturedUtc"?,"rois":[{"roiId":"L3","tracks":[{"trackId":"t-778","items":{"helmet":true}}]}]}
+// Roi is null for the flat shape. One reading is produced per ROI, so an ROI with nobody in it is recorded too (it is how a lost track is noticed).
 public static class PpeMessage
 {
-    public static IEnumerable<(string Device, string Channel, PpeReading Reading)> Parse(JsonElement root, DateTime receivedUtc)
+    public static IEnumerable<(string Device, string Channel, string? Roi, PpeReading Reading)> Parse(JsonElement root, DateTime receivedUtc)
     {
         foreach (var x in root.ValueKind == JsonValueKind.Array ? root.EnumerateArray().ToList() : [root])
         {
-            var items = new Dictionary<string, bool>();
-            if (x.TryGetProperty("items", out var map) && map.ValueKind == JsonValueKind.Object)
-                foreach (var p in map.EnumerateObject()) if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) items[p.Name.ToLowerInvariant()] = p.Value.GetBoolean();
             // The station clock decides freshness: camera time is only used when it is close to the receive time.
             var at = x.TryGetProperty("capturedUtc", out var t) && t.TryGetDateTime(out var c) && Math.Abs((c.ToUniversalTime() - receivedUtc).TotalSeconds) < 5 ? c.ToUniversalTime() : receivedUtc;
-            yield return (T1550Adapter.Normalize(T1550Adapter.Str(x, "deviceId")), T1550Adapter.Str(x, "channel"),
-                new PpeReading(at, x.TryGetProperty("peopleInRoi", out var n) && n.TryGetInt32(out var people) ? people : -1, items));
+            var device = T1550Adapter.Normalize(T1550Adapter.Str(x, "deviceId")); var channel = T1550Adapter.Str(x, "channel");
+            if (x.TryGetProperty("rois", out var rois) && rois.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var roi in rois.EnumerateArray())
+                {
+                    var tracks = roi.TryGetProperty("tracks", out var list) && list.ValueKind == JsonValueKind.Array ? list.EnumerateArray().ToList() : [];
+                    // Items and track only mean something when exactly one person is in the ROI; with 0 or 2+ people the reading is "not single".
+                    var single = tracks.Count == 1 ? tracks[0] : (JsonElement?)null;
+                    var trackId = single is { } one ? T1550Adapter.Str(one, "trackId") : "";
+                    yield return (device, channel, T1550Adapter.Str(roi, "roiId"),
+                        new PpeReading(at, tracks.Count, single is { } s ? Items(s) : new Dictionary<string, bool>(), trackId.Length > 0 ? trackId : null));
+                }
+                continue;
+            }
+            yield return (device, channel, null,
+                new PpeReading(at, x.TryGetProperty("peopleInRoi", out var n) && n.TryGetInt32(out var people) ? people : -1, Items(x)));
         }
+    }
+
+    // Which camera row, and so which lane, a reading belongs to. With a roiId the row must name that ROI; without one the row must name none
+    // (one camera ↔ one lane). A roiId nobody configured finds nothing: the reading is ignored rather than guessed onto another lane.
+    public static Camera? CameraFor(IEnumerable<Camera> candidates, string? roi) =>
+        roi is { Length: > 0 } ? candidates.FirstOrDefault(x => x.ExternalRoi == roi) : candidates.FirstOrDefault(x => string.IsNullOrEmpty(x.ExternalRoi));
+
+    private static Dictionary<string, bool> Items(JsonElement owner)
+    {
+        var items = new Dictionary<string, bool>();
+        if (owner.TryGetProperty("items", out var map) && map.ValueKind == JsonValueKind.Object)
+            foreach (var p in map.EnumerateObject()) if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) items[p.Name.ToLowerInvariant()] = p.Value.GetBoolean();
+        return items;
     }
 }

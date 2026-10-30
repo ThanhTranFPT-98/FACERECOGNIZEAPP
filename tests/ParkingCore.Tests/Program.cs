@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -368,6 +369,83 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     Check(upgraded.MergeWindowSeconds == 10 && upgraded.PpeWindowSeconds == 3 && upgraded.PpeConfirmCount == 2, "Upgraded site gets the default merge/PPE settings, not 0");
     var upgradedLane = await up.Lanes.SingleAsync();
     Check(upgradedLane.Subject == "Vehicle" && upgradedLane.PpeMissingMode == "Review", "Upgraded lanes are vehicle lanes with review on missing PPE data");
+}
+
+// ---- CR-018: PPE by ROI and track (station plan §4.4, §5.4) ----
+{
+    var t0 = new DateTime(2026, 10, 30, 6, 0, 0, DateTimeKind.Utc);
+    var rules = PpeRules.Parse("helmet=required");
+    var window = TimeSpan.FromSeconds(3);
+    PpeReading T(int secondsAgo, string track, bool helmet) => new(t0.AddSeconds(-secondsAgo), 1, new Dictionary<string, bool> { ["helmet"] = helmet }, track);
+    PpeReading Empty(int secondsAgo) => new(t0.AddSeconds(-secondsAgo), 0, new Dictionary<string, bool>());
+    PpeVerdict D(params PpeReading[] r) => PpeRules.Decide(r, rules, t0, window, 2, "Review");
+
+    using var message = System.Text.Json.JsonDocument.Parse("""
+        {"deviceId":"AIBOX-1","channel":"1","frame":9,"rois":[
+          {"roiId":"L1","tracks":[{"trackId":"t-7","items":{"helmet":true,"vest":false}}]},
+          {"roiId":"L2","tracks":[]},
+          {"roiId":"L3","tracks":[{"trackId":"a","items":{"helmet":true}},{"trackId":"b","items":{"helmet":false}}]}]}
+        """);
+    var parsed = PpeMessage.Parse(message.RootElement, t0).ToList();
+    Check(parsed.Count == 3 && parsed.Select(x => x.Roi).SequenceEqual(["L1", "L2", "L3"]), "A PPE message by ROI gives one reading per ROI");
+    Check(parsed[0].Reading is { PeopleInRoi: 1, TrackId: "t-7" } one && one.Items["helmet"] && !one.Items["vest"], "One track in the ROI: its id and items");
+    Check(parsed[1].Reading is { PeopleInRoi: 0, TrackId: null }, "An empty ROI is a reading too (it is how a lost track is noticed)");
+    Check(parsed[2].Reading is { PeopleInRoi: 2, TrackId: null } two && two.Items.Count == 0, "Two tracks: not single, and no items are guessed");
+    using var flat = System.Text.Json.JsonDocument.Parse("""{"deviceId":"x","channel":"1","peopleInRoi":1,"items":{"helmet":true}}""");
+    Check(PpeMessage.Parse(flat.RootElement, t0).Single() is { Roi: null, Reading.TrackId: null, Reading.PeopleInRoi: 1 }, "The flat CR-008 message still parses, without ROI or track");
+
+    var l1 = new Camera { Id = "ppe-l1", ExternalDevice = "AIBOX1", ExternalRoi = "L1", LaneId = "lane-1" };
+    var l2 = new Camera { Id = "ppe-l2", ExternalDevice = "AIBOX1", ExternalRoi = "L2", LaneId = "lane-2" };
+    var whole = new Camera { Id = "ppe-whole", ExternalDevice = "AIBOX1", LaneId = "lane-9" };
+    Check(PpeMessage.CameraFor([l1, l2, whole], "L2") == l2 && PpeMessage.CameraFor([l1, l2, whole], "L1") == l1, "One AI box, two ROIs → two lanes");
+    Check(PpeMessage.CameraFor([l1, l2, whole], "L7") is null, "A ROI nobody configured finds no lane: it is not guessed onto another");
+    Check(PpeMessage.CameraFor([l1, l2, whole], null) == whole && PpeMessage.CameraFor([l1, l2], null) is null, "A message without ROI only goes to a camera row without ROI");
+
+    Check(D(T(1, "a", true)) is { Outcome: "Ok", TrackId: "a" }, "The verdict names the track it was made for");
+    Check(D(T(2, "a", false), T(1, "a", false)).Reason == "PPE_MISSING:helmet", "The same track missing a helmet twice → deny");
+    Check(D(T(2, "a", false), T(1, "b", false)) is { Outcome: "Review", Reason: "PPE_UNCONFIRMED:helmet", TrackId: "b" }, "Another track counts from zero: one missing reading is only a review");
+    Check(D(T(2, "a", false), T(1, "b", true)).Outcome == "Ok", "Another person's missing helmet does not count against this one");
+
+    Check(PpeRules.SameTrack([T(2, "a", true), T(1, "a", true)], "a", t0, window), "Same track, still alone in the ROI → open");
+    Check(!PpeRules.SameTrack([T(2, "a", true), T(1, "b", true)], "a", t0, window), "Another track now → TRACK_CHANGED");
+    Check(!PpeRules.SameTrack([T(2, "a", true), Empty(1)], "a", t0, window), "ROI empty → the track is lost");
+    Check(!PpeRules.SameTrack([T(2, "a", true), new PpeReading(t0.AddSeconds(-1), 2, new Dictionary<string, bool>())], "a", t0, window), "A second person walks in → not single");
+    Check(!PpeRules.SameTrack([T(10, "a", true)], "a", t0, window) && !PpeRules.SameTrack([], "a", t0, window), "The PPE camera went quiet beyond the window → the track is lost");
+}
+
+// CR-018 through ParkingService: the decision is made for track "a"; the automatic opening checks that "a" is still the person in the ROI.
+{
+    using var trackConnection = new SqliteConnection("Data Source=:memory:");
+    trackConnection.Open();
+    using var sdb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(trackConnection).Options);
+    await sdb.Database.MigrateAsync();
+    sdb.Lanes.Add(new Lane { Id = "flap-1", Subject = "Person", Policy = "FaceOnly", Direction = "Entry", PpeRules = "helmet=required", ShadowMode = false, Simulation = true, AutoOpen = true, CooldownSeconds = 0 });
+    sdb.People.Add(new AuthorizedPerson { PersonId = 7, Name = "Worker 7" });
+    await sdb.SaveChangesAsync();
+    var ppeCache = new PpeCache();
+    var service = new ParkingService(sdb, new ParkingLock(), new ConfigurationBuilder().Build(), null!, new NoHub(), null!, ppeCache, new AutoOpenQueue());
+    void See(string track, int people = 1) => ppeCache.Record("flap-1", new PpeReading(DateTime.UtcNow, people, new Dictionary<string, bool> { ["helmet"] = true }, people == 1 ? track : null));
+    async Task<AccessEvent> Face(string correlation) => await service.Observe("flap-1", correlation, new("", 0, 7, .97, "test"), "test", "ThirdPartyCamera");
+    async Task<AccessEvent> Reload(Guid id) => await sdb.Events.AsNoTracking().SingleAsync(x => x.Id == id);
+
+    See("a"); var first = await Face("c1");
+    Check(first.Outcome == "Allow" && first.PpeTrackId == "a", "The event keeps the track its PPE verdict was made for");
+    See("b");
+    var held = await Assert.ThrowsAsync<InvalidOperationException>(() => service.Open(first.Id, "automatic-policy", automatic: true));
+    var after = await Reload(first.Id);
+    Check(held.Message.StartsWith("TRACK_CHANGED") && after is { Outcome: "ManualReview", Reason: "TRACK_CHANGED" }
+        && await sdb.Alerts.AnyAsync(x => x.EventId == first.Id && x.Reason == "TRACK_CHANGED") && !await sdb.Commands.AnyAsync(x => x.EventId == first.Id),
+        "Another track in the ROI → nothing opens; the event goes to the guard as TRACK_CHANGED");
+
+    See("c"); var second = await Face("c2"); See("c");
+    Check((await service.Open(second.Id, "automatic-policy", automatic: true)).Status == "Simulated", "The same track still alone in the ROI → the automatic opening goes ahead");
+
+    See("d"); var third = await Face("c3"); See("d", people: 2);
+    await Assert.ThrowsAsync<InvalidOperationException>(() => service.Open(third.Id, "automatic-policy", automatic: true));
+    Check((await Reload(third.Id)).Reason == "TRACK_CHANGED", "A second person stepping into the ROI also holds the opening");
+
+    See("e"); var fourth = await Face("c4"); See("f");
+    Check((await service.Open(fourth.Id, "guard", automatic: false)).Status == "Simulated", "A guard's own click is not re-checked against the track (the guard is looking at the person)");
 }
 
 // ---- CR-009: gate operations ----
@@ -886,4 +964,34 @@ sealed class FlakyStorage(IObjectStorage inner, int failures) : IObjectStorage
     public string? ReadUrl(string key, TimeSpan validFor) => null;
     public Task<IReadOnlyList<string>> ListAsync(string prefix, string? startAfter, int max, CancellationToken cancellation) => inner.ListAsync(prefix, startAfter, max, cancellation);
     public Task<Stream?> GetAsync(string key, CancellationToken cancellation) => inner.GetAsync(key, cancellation);
+}
+
+// SignalR stand-in for tests that drive ParkingService without a web host.
+sealed class NoHub : IHubContext<ParkingHub>
+{
+    public IHubClients Clients { get; } = new NoClients();
+    public IGroupManager Groups => throw new NotSupportedException();
+}
+sealed class NoClients : IHubClients
+{
+    private static readonly IClientProxy Proxy = new NoProxy();
+    public IClientProxy All => Proxy;
+    public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => Proxy;
+    public IClientProxy Client(string connectionId) => Proxy;
+    public IClientProxy Clients(IReadOnlyList<string> connectionIds) => Proxy;
+    public IClientProxy Group(string groupName) => Proxy;
+    public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => Proxy;
+    public IClientProxy Groups(IReadOnlyList<string> groupNames) => Proxy;
+    public IClientProxy User(string userId) => Proxy;
+    public IClientProxy Users(IReadOnlyList<string> userIds) => Proxy;
+}
+sealed class NoProxy : IClientProxy { public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default) => Task.CompletedTask; }
+static class Assert
+{
+    public static async Task<T> ThrowsAsync<T>(Func<Task> action) where T : Exception
+    {
+        try { await action(); }
+        catch (T ex) { return ex; }
+        throw new Exception("Expected " + typeof(T).Name);
+    }
 }

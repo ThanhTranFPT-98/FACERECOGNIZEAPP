@@ -30,6 +30,8 @@ public class Camera
     // Third-party AI camera mapping (CR-007): device ID (MAC without separators) + channel → this camera → its lane.
     [MaxLength(40)] public string? ExternalDevice { get; set; }
     [MaxLength(20)] public string? ExternalChannel { get; set; }
+    // CR-018: one PPE camera may cover several lanes, one ROI per lane. Device + channel + ROI → this row → its lane. Empty = the whole image (one camera ↔ one lane).
+    [MaxLength(40)] public string? ExternalRoi { get; set; }
     // Confidence given to this device's results after field evaluation; null = results always go to guard review.
     public double? TrustedConfidence { get; set; }
     public DateTime? LastMessageUtc { get; set; }
