@@ -1,0 +1,10 @@
+id: K6
+title: Hai người trong ROI → chuyển bảo vệ xem xét
+base: cualo
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: true, vest: true, boots: true}}, {track: t-2, items: {helmet: true, vest: true, boots: true}}]}}
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7, outcome: ManualReview, reason: PPE_ROI_NOT_SINGLE}
+      opened: false
+      commands: 0

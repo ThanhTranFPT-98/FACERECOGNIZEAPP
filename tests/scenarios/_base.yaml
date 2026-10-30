@@ -1,0 +1,27 @@
+# Setups that scenarios build on (station plan §6, §7). A scenario says `base: cualo` and may patch every lane with `lane:`.
+# Only what a scenario needs: one lane, its devices, a few workers or vehicles. The real station layout (lane counts, device IDs)
+# comes from the survey (III.3), not from here.
+
+# Cửa lò: a flap lane for people. Face-S sends the face, one AI box sends PPE by ROI and track. Opens by itself (simulated barrier).
+cualo:
+  lanes:
+    - {id: flap-1, direction: Entry, subject: Person, policy: FaceOnly, faceThreshold: 0.8, plateThreshold: 0.9,
+       ppeRules: "helmet=required,vest=required,boots=required", ppeMissingMode: Review,
+       autoOpen: true, shadowMode: false, simulation: true}
+  cameras:
+    - {id: face-1, laneId: flap-1, externalDevice: ZK-01, trustedConfidence: 0.99}
+    - {id: ppe-1, laneId: flap-1, externalDevice: AIBOX-1, externalRoi: L1, trustedConfidence: 0.99}
+  people:
+    - {personId: 7, name: Worker 7}
+    - {personId: 8, name: Worker 8}
+
+# Cổng bảo vệ: a car entry lane and an exit lane, plate cameras trusted, opens by itself (simulated barrier).
+cong:
+  lanes:
+    - {id: gate-in, direction: Entry, subject: Vehicle, policy: PlateOnly, faceThreshold: 0.8, plateThreshold: 0.9, autoOpen: true, shadowMode: false, simulation: true}
+    - {id: gate-out, direction: Exit, subject: Vehicle, policy: PlateOnly, faceThreshold: 0.8, plateThreshold: 0.9, exitRequiresEntry: true, autoOpen: true, shadowMode: false, simulation: true}
+  cameras:
+    - {id: plate-in, laneId: gate-in, externalDevice: LPR-IN, trustedConfidence: 0.99}
+    - {id: plate-out, laneId: gate-out, externalDevice: LPR-OUT, trustedConfidence: 0.99}
+  vehicles:
+    - {plate: 30A12345, owner: Resident, kind: Car}

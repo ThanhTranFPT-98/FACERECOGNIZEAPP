@@ -1,0 +1,10 @@
+id: K3
+title: Thiếu giày ở 1 lần đọc → chuyển bảo vệ xem xét, chưa chặn
+base: cualo
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: true, vest: true, boots: false}}]}}
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7, outcome: ManualReview, reason: "PPE_UNCONFIRMED:boots"}
+      opened: false
+      commands: 0

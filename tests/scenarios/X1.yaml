@@ -1,0 +1,9 @@
+id: X1
+title: Biển số đã đăng ký, camera đã được tin cậy → tự mở
+base: cong
+steps:
+  - plate: {device: LPR-IN, plate: 30A12345}
+  - expect:
+      event: {plate: "30A12345", lane: gate-in, outcome: Allow}
+      opened: true
+      commands: 1

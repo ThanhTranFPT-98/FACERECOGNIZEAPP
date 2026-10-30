@@ -1,0 +1,12 @@
+id: K2
+title: Thiếu mũ ở 2 lần đọc liên tiếp → không mở, Deny PPE_MISSING:helmet, có cảnh báo
+base: cualo
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: false, vest: true, boots: true}}]}}
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: false, vest: true, boots: true}}]}}
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7, outcome: Deny, reason: "PPE_MISSING:helmet"}
+      opened: false
+      commands: 0
+      alerts: ["PPE_MISSING"]

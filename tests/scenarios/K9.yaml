@@ -1,0 +1,11 @@
+id: K9
+title: Face-S gửi lại cùng một sự kiện 3 lần (retry) → một sự kiện, một lệnh
+base: cualo
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: true, vest: true, boots: true}}]}}
+  - face: {device: ZK-01, person: 7, identical: true, repeat: 3}
+  - expect:
+      event: {person: 7, outcome: Allow}
+      opened: true
+      events: 1
+      commands: 1

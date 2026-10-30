@@ -1,0 +1,10 @@
+id: K7
+title: Không có kết quả PPE (AI Box mất kết nối) → theo PpeMissingMode, mặc định bảo vệ xem xét
+base: cualo
+steps:
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7, outcome: ManualReview, reason: PPE_NO_DATA}
+      opened: false
+      commands: 0
+# Cảnh báo "thiết bị im lặng" của K7 cần chờ ≥ 30 giây; đã có test riêng (test_monitoring_alerts_wall_and_device_health).

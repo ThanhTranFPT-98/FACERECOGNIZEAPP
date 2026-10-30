@@ -1,0 +1,3 @@
+id: K8
+title: Đổi track giữa lúc quyết định và lúc mở → không mở, TRACK_CHANGED, xác thực lại
+covered_by: "tests/ParkingCore.Tests (khối CR-018 qua ParkingService): lệnh mở tự động chạy ngay sau quyết định nên không chen được từ bên ngoài"

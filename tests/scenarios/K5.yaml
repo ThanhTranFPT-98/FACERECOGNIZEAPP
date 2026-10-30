@@ -1,0 +1,19 @@
+id: K5
+title: Người bị khóa hoặc hết hạn → không mở
+base: cualo
+people:
+  - {personId: 7, name: Worker 7, active: false}                      # bị khóa
+  - {personId: 8, name: Worker 8, active: true, validUntilUtc: "2020-01-01T00:00:00Z"}   # hết hạn
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: true, vest: true, boots: true}}]}}
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7}
+      opened: false
+      commands: 0
+  - face: {device: ZK-01, person: 8}
+  - expect:
+      event: {person: 8}
+      opened: false
+      commands: 0
+# Trạm áp dụng danh sách từ Cloud trong ≤ 60 giây là kịch bản S1; ở đây chỉ kiểm tra hệ quả: người đã bị khóa trong danh sách của trạm thì không mở.

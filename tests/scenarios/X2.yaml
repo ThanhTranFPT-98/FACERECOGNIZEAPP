@@ -1,0 +1,14 @@
+id: X2
+title: Biển lạ → bảo vệ xem xét; đăng ký vãng lai trong ngày → đi qua được
+base: cong
+steps:
+  - plate: {device: LPR-IN, plate: 30K99999}
+  - expect:
+      event: {plate: "30K99999", outcome: ManualReview}
+      opened: false
+  - walkin: {plate: 30K99999, name: Unknown driver}
+  - wait: 11   # cùng biển trên cùng làn trong 10 giây được gộp thành một lượt (GC-24)
+  - plate: {device: LPR-IN, plate: 30K99999}
+  - expect:
+      event: {plate: "30K99999", outcome: Allow, reason: ACTIVE_VISITOR}
+      opened: true

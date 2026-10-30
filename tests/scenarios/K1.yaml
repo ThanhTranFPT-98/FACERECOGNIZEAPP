@@ -1,0 +1,10 @@
+id: K1
+title: Công nhân có trong danh sách, đủ mũ, áo, giày → mở
+base: cualo
+steps:
+  - ppe: {rois: {L1: [{track: t-1, items: {helmet: true, vest: true, boots: true}}]}}
+  - face: {device: ZK-01, person: 7}
+  - expect:
+      event: {person: 7, outcome: Allow, ppeOutcome: Ok, ppeTrackId: t-1}
+      opened: true
+      commands: 1

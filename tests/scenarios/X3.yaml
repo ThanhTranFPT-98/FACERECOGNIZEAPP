@@ -1,0 +1,9 @@
+id: X3
+title: Ra mà không có lượt vào → bảo vệ xem xét (EXIT_WITHOUT_ENTRY)
+base: cong
+steps:
+  - plate: {device: LPR-OUT, plate: 30A12345}
+  - expect:
+      event: {plate: "30A12345", lane: gate-out, outcome: ManualReview, reason: EXIT_WITHOUT_ENTRY}
+      opened: false
+      commands: 0
