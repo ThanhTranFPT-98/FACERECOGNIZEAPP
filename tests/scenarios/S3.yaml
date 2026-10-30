@@ -1,0 +1,3 @@
+id: S3
+title: Công nhân vào ở cửa lò, ra ở cổng bảo vệ → cả hai trạm đều thấy người này đã ra
+covered_by: "python tests/integration_parking.py (test_presence_across_two_stations: đồng bộ hiện diện giữa hai trạm qua LAN, CR-010)"

@@ -1,0 +1,3 @@
+id: K10
+title: Mất Internet khi đang có người qua → mọi quyết định vẫn đúng; có mạng lại thì gửi đủ, không trùng
+covered_by: "python tests/run_cloud_scenarios.py K10 (thu nhỏ: mặc định 30 giây và 60 lượt; số bản ghi đệm và tốc độ gửi bù được in ra để ngoại suy 72 giờ; chạy 4 giờ thật là việc ở tuần 3)"

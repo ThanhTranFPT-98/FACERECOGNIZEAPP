@@ -1,0 +1,3 @@
+id: S1
+title: Thêm hoặc khóa một công nhân trên Cloud → trạm áp dụng trong ≤ 60 giây; Cloud thấy đúng phiên bản
+covered_by: "python tests/run_cloud_scenarios.py S1 (chạy trạm và DSA_Platform thật trên PostgreSQL; cần Docker)"

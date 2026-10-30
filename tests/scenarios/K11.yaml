@@ -1,0 +1,3 @@
+id: K11
+title: Bộ I/O không trả lời lệnh mở → lệnh Unknown, không mở lần hai
+covered_by: "python tests/integration_parking.py (test_operator_workflow_and_security: bridge trả sai ACK → lệnh Unknown, mở lại không gửi lệnh thứ hai). Cảnh báo Critical BARRIER_OUTCOME_UNKNOWN do code tạo (ParkingService.Open) nhưng chưa có test kiểm tra trực tiếp"

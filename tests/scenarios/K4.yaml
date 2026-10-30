@@ -1,0 +1,3 @@
+id: K4
+title: PIN không có trong bảng map → không mở, cảnh báo UNKNOWN_PERSON
+covered_by: "python tests/integration_parking.py (test_device_profiles_and_identities: PIN đã map → Allow; PIN lạ → bảo vệ xem xét và cảnh báo UNKNOWN_PERSON)"

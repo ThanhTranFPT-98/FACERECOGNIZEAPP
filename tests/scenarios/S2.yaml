@@ -1,0 +1,3 @@
+id: S2
+title: Cloud trả về danh sách lỗi giữa chừng → trạm giữ nguyên bản cũ, không áp dụng nửa vời
+covered_by: "tests/ParkingCore.Tests, khối CR-017: danh sách hỏng bị từ chối toàn bộ, phiên bản cũ vẫn có hiệu lực; Platform down thì dùng danh sách hiện có"

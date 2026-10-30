@@ -613,6 +613,7 @@ dotnet run --project tests/ParkingCore.Tests
 dotnet run --project tests/ParkingSimulation.Tests
 python tests/integration_parking.py          # needs Debug build of API
 python tests/run_scenarios.py [K1 X2 …]      # CR-019: station plan §7 scenarios from tests/scenarios/*.yaml, prints ĐẠT / KHÔNG ĐẠT
+python tests/run_cloud_scenarios.py [S1 K10] # CR-019: scenarios that need a real DSA_Platform (PostgreSQL in Docker, own throw-away database)
 $env:PARKING_FFMPEG='C:\tools\ffmpeg.exe'; python tests/integration_video.py   # CR-001 end-to-end (real ffmpeg, folder "cloud")
 python -m unittest discover -s AiService -p test_plate_service.py -v
 python -m unittest discover -s tests -p test_backup.py -v
@@ -752,7 +753,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
-| CR-019 | 2026-10-30 | ThanhTranFPT-98 (station plan §6, §7) | Scenario runner: device-message timelines in YAML, ĐẠT / KHÔNG ĐẠT | High | First part done: 11 of 20 scenarios; the rest need a Cloud stub, a live bridge or a long run |
+| CR-019 | 2026-10-30 | ThanhTranFPT-98 (station plan §6, §7) | Scenario runner: device-message timelines in YAML, ĐẠT / KHÔNG ĐẠT | High | Done for what runs on a laptop: 11 scenarios run here, S1 and K10 run against a real DSA_Platform, 7 others point to the test that covers them; real 4 h run and the station PC are week 3 |
 | CR-018 | 2026-10-30 | ThanhTranFPT-98 (station plan §4.4, §5.4; decision 19/10) | PPE + FaceID paired by ROI and track; re-check before opening (`TRACK_CHANGED`) | High | Done, locally tested; the AI box message format is still to be confirmed with Dũng (Q-B) |
 | CR-017 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.1, §5.2) | Master list from the FPT Cloud platform; personId shared with the cloud | High | Done; tested against a local DSA_Platform |
 | CR-016 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.2, §5.1, §5.3) | Station → FPT Cloud platform: events, evidence, heartbeat (dsa.station/1 draft) | High | Done; tested against a local DSA_Platform; contract still a draft |
@@ -774,15 +775,21 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 ### CR-019 — Scenario runner (station plan §6, §7)
 - **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §6: "a runner plays a timeline of device messages and prints ĐẠT / KHÔNG ĐẠT, so week 3 only re-runs it".
-- **Interpretation (what we built):** `tests/run_scenarios.py` plays `tests/scenarios/*.yaml` against the real API (Debug build, temporary DB, fake barrier bridge; it reuses the `integration_parking.py` harness). A scenario names a `base` (`tests/scenarios/_base.yaml`: `cualo` = person flap lane with Face-S and an AI box ROI; `cong` = car entry and exit lanes with plate cameras), then a list of steps:
-  - device messages: `ppe` (AI box: ROIs with tracks and items), `face` (Face-S: person, confidence, `repeat`, `identical` for a retry), `plate`, and the guard's `walkin`; `wait`;
+- **Interpretation (what we built):** `tests/run_scenarios.py` plays `tests/scenarios/*.yaml` against the real API (Debug build, temporary DB, fake barrier bridge; it reuses the `integration_parking.py` harness). A scenario names a `base` (`tests/scenarios/_base.yaml`: `cualo` = person flap lane with Face-S and an AI box ROI; `cong` = car entry and exit lanes with plate cameras; `xemay` = motorbike entry and exit lanes with a terminal that reads plate and rider), then a list of steps:
+  - device messages: `ppe` (AI box: ROIs with tracks and items), `face` (Face-S: person, confidence, `repeat`, `identical` for a retry), `plate` (with `person` for a terminal that also reads the rider), `passage` (the loop confirms the newest command was passed, which opens a session), and the guard's `walkin`; `wait`;
   - `expect`: the newest event of a person/plate/lane (`outcome`, `reason`, `ppeOutcome`, `ppeTrackId`), whether the barrier was told to open (`opened`), totals (`events`, `commands`) and unresolved `alerts`.
   A scenario with `covered_by` only points to the test that covers it.
-- **Covered now (11):** K1, K2, K3, K5, K6, K7, K9, X1, X2, X3 run here; K8 is covered by `ParkingCore.Tests` (the automatic opening starts right after the decision, so it cannot be interleaved from outside).
-- **Not yet:** K4 (unknown PIN: needs a device profile and identity map), K10 (4 h without Internet), K11 (bridge silent: needs a live lane), X4 (person mismatch on the motorbike lane), X5 (inspection photo; covered by `test_gate_operations`), X6 (load; `load_test.py` exists), S1–S3 (need the Cloud stub or a local `DSA_Platform`). The "silent device" alert of K7 needs a wait of 30 s or more and is covered by `test_monitoring_alerts_wall_and_device_health`.
+- **Coverage of the 20 scenarios:**
+  - **Run by `run_scenarios.py` (11):** K1, K2, K3, K5, K6, K7, K9, X1, X2, X3, X4.
+  - **Run by `tests/run_cloud_scenarios.py` (2), against a real `DSA_Platform` on PostgreSQL:** S1 (master list down, version acknowledged) and K10 (the Cloud is stopped during traffic, then restarted; scaled to 30 s and 60 decisions by default, with the buffer size and send rate printed so the 72 h can be extrapolated). The platform gets a throw-away database in the dev container and drops it at the end; it needs Docker running.
+  - **Pointed to the test that already covers them (7):** K4 and S3 and K11 and X5 (`integration_parking.py`), K8 and S2 (`ParkingCore.Tests`; K8 cannot be interleaved from outside because the automatic opening starts right after the decision), X6 (`load_test.py`).
+- **Gaps:** the Critical alert `BARRIER_OUTCOME_UNKNOWN` of K11 is raised by `Open()` but no test asserts it. The "silent device" alert of K7 needs a wait of 30 s or more and is covered by `test_monitoring_alerts_wall_and_device_health`. The real 4-hour outage of K10, X6 at the plan's load (100 vehicles in 15 min on 2 lanes) and everything on the real station PC belong to week 3.
 - **Design decision and why:** self-contained setups instead of a seed of the real stations: the real lane count, directions and device IDs come from the survey (III.3) and are not in the plan. The runner starts a fresh API per scenario (about 4 s) so scenarios cannot affect each other.
-- **Status:** First part done.
-- **Result / verification (2026-10-30):** 9 passed, 0 failed, 1 covered elsewhere (K1–K3, K6, K7, K9, X1–X3), then K5 passed. Two deliberately wrong scenarios (wrong outcome, wrong `opened`) were reported KHÔNG ĐẠT, so the runner can fail.
+- **Status:** Done for what runs on a laptop. All 20 scenarios of plan §7 are accounted for.
+- **Result / verification (2026-10-30):**
+  - `run_scenarios.py`: 11 ĐẠT, 0 KHÔNG ĐẠT, 9 pointers. Two deliberately wrong scenarios (wrong outcome, wrong `opened`) were reported KHÔNG ĐẠT, so the runner can fail.
+  - `run_cloud_scenarios.py` against `DSA_Platform` (PostgreSQL 16.8 in `deploy-postgres-1`): **S1** ĐẠT: a new worker reached the station in 5 s and a lock in 5 s (the test sets the pull to 5 s; production default is 30 s, limit 60 s), and the platform showed the station's applied version equal to its own (version 2). **K10** (scaled) ĐẠT: 60 decisions during 31 s without the Cloud, all Allow; 117 records buffered (1.9 per decision); sent in 34 s after reconnect (3.4 records/s); none missing or duplicated on the Cloud. Extrapolated: 72 h at 4,000 events/day ≈ 23,400 records ≈ 114 min to send at this rate on this laptop. This is an estimate, not a measurement on the station PC. No test database was left behind.
+  - **X6** (`load_test.py --vehicles 40 --lane-gap 5 --bridge-delay 2`, 2 lanes): PASS; received → decision P95 0.335 s, received → open command P95 0.348 s (target ≤ 1.0 s), 40/40 events, 40 commands, none held. Lighter than the plan's load (100 vehicles in 15 min on 2 lanes) and not on the station PC.
 
 ### CR-018 — PPE + FaceID paired by ROI and track; re-check before opening
 - **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Station plan §4.4 and §5.4. Decision 19/10: "track people continuously → run PPE when the person is in the lane's ROI → pair with Face ID by (lane, time); open only when there is exactly 1 person in the ROI with helmet, vest and boots. If the track is lost or changes, verify again."

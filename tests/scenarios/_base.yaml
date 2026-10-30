@@ -25,3 +25,15 @@ cong:
     - {id: plate-out, laneId: gate-out, externalDevice: LPR-OUT, trustedConfidence: 0.99}
   vehicles:
     - {plate: 30A12345, owner: Resident, kind: Car}
+
+# Làn xe máy ở cổng bảo vệ: the terminal reads the plate and the rider's face in one message. Entry and exit both decide by plate; the exit
+# then compares the rider with the one who came in (GC-13).
+xemay:
+  lanes:
+    - {id: moto-in, direction: Entry, subject: Vehicle, policy: PlateOnly, faceThreshold: 0.8, plateThreshold: 0.9, autoOpen: true, shadowMode: false, simulation: true}
+    - {id: moto-out, direction: Exit, subject: Vehicle, policy: PlateOnly, faceThreshold: 0.8, plateThreshold: 0.9, exitRequiresEntry: true, autoOpen: true, shadowMode: false, simulation: true}
+  cameras:
+    - {id: term-in, laneId: moto-in, externalDevice: TERM-IN, trustedConfidence: 0.99}
+    - {id: term-out, laneId: moto-out, externalDevice: TERM-OUT, trustedConfidence: 0.99}
+  vehicles:
+    - {plate: 29MD12345, owner: Worker 7, kind: Motorcycle, personId: 7}

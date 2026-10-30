@@ -69,8 +69,16 @@ class Runner(ParkingIntegration):
         for _ in range(step.get('repeat', 1)):
             self.send('generic', body if step.get('identical') else {**body, 'seq': next(self.frames)})
 
-    def plate(self, step):   # a plate camera
-        self.send('generic', {'deviceId': step['device'], 'plate': step['plate'], 'confidence': step.get('confidence', .99), 'seq': next(self.frames)})
+    def plate(self, step):   # a plate camera; with `person`, a terminal that also reads the rider's face
+        body = {'deviceId': step['device'], 'plate': step['plate'], 'confidence': step.get('confidence', .99), 'seq': next(self.frames)}
+        if 'person' in step: body['personId'] = step['person']
+        self.send('generic', body)
+
+    def passage(self, step):   # the loop confirms the newest barrier command was passed: this is what opens a parking session
+        commands = self.snapshot()['commands']
+        if not commands: raise Mismatch('there is no barrier command to confirm a passage for')
+        newest = max(commands, key=lambda c: c['createdUtc'])
+        self.must(self.call('POST', f"{ROOT}/commands/{newest['id']}/simulate-passage", {}), 'confirm passage')
 
     def walkin(self, step):   # the guard registers a walk-in vehicle at the gate
         self.must(self.call('POST', ROOT + '/visits/walk-in', {'plate': step['plate'], 'name': step.get('name', 'Walk-in')}), 'walk-in ' + step['plate'])
@@ -116,7 +124,7 @@ class Runner(ParkingIntegration):
     def play(self, scenario, bases):
         setup = {**bases.get(scenario['base'], {}), **{k: scenario[k] for k in ('lane', 'lanes', 'cameras', 'people', 'vehicles') if k in scenario}}
         self.prepare(setup)
-        actions = {'ppe': self.ppe, 'face': self.face, 'plate': self.plate, 'walkin': self.walkin, 'expect': self.expect}
+        actions = {'ppe': self.ppe, 'face': self.face, 'plate': self.plate, 'walkin': self.walkin, 'passage': self.passage, 'expect': self.expect}
         for number, step in enumerate(scenario['steps'], 1):
             for name, argument in step.items():
                 try:
@@ -131,7 +139,7 @@ class Runner(ParkingIntegration):
 def main(wanted):
     sys.stdout.reconfigure(encoding='utf-8')   # the Windows console and pipes default to cp1252, which has no Vietnamese
     bases = yaml.safe_load((DIRECTORY / '_base.yaml').read_text(encoding='utf-8'))
-    scenarios = [yaml.safe_load(f.read_text(encoding='utf-8')) for f in sorted(DIRECTORY.glob('[!_]*.yaml'))]
+    scenarios = sorted((yaml.safe_load(f.read_text(encoding='utf-8')) for f in DIRECTORY.glob('[!_]*.yaml')), key=lambda s: (s['id'][0], int(s['id'][1:])))
     scenarios = [s for s in scenarios if not wanted or s['id'] in wanted]
     if not scenarios:
         print('No scenario matches.'); return 2

@@ -1,0 +1,13 @@
+id: X4
+title: Làn xe máy ở cổng bảo vệ, người ra khác người vào → bảo vệ xem xét (EXIT_PERSON_MISMATCH)
+base: xemay
+steps:
+  - plate: {device: TERM-IN, plate: 29MD12345, person: 7}
+  - expect:
+      event: {plate: "29MD12345", lane: moto-in, outcome: Allow, personId: 7}
+      opened: true
+  - passage: {}
+  - plate: {device: TERM-OUT, plate: 29MD12345, person: 8}
+  - expect:
+      event: {plate: "29MD12345", lane: moto-out, outcome: ManualReview, reason: EXIT_PERSON_MISMATCH}
+      opened: false

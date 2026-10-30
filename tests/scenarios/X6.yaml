@@ -1,0 +1,3 @@
+id: X6
+title: Tải đỉnh → P95 từ lúc nhận kết quả đến lúc ra lệnh ≤ 1 giây
+covered_by: "python tests/load_test.py --vehicles 40 --lane-gap 5 --bridge-delay 2 (CR-013). Tải của plan (100 xe/15 phút trên 2 làn) và máy trạm thật là việc ở tuần 3"
