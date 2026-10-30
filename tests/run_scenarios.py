@@ -17,7 +17,9 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from integration_parking import ParkingIntegration  # noqa: E402  (the harness: temp DB, API process, fake barrier bridge)
+import simulator  # noqa: E402  (the same device messages the simulator sends to a running station)
 
 DIRECTORY = Path(__file__).resolve().parent / 'scenarios'
 ROOT = '/api/v1/parking'
@@ -61,27 +63,23 @@ class Runner(ParkingIntegration):
             raise Mismatch(f'the receiver refused a {adapter} message: {status}')
 
     def ppe(self, step):   # the AI box: per ROI the people it follows, each with a track and the items it sees
-        rois = [{'roiId': roi, 'tracks': [{'trackId': t['track'], 'items': t['items']} for t in tracks or []]} for roi, tracks in step['rois'].items()]
-        self.send('ppe', {'deviceId': step.get('box', 'AIBOX-1'), 'channel': '1', 'frame': next(self.frames), 'rois': rois})
+        self.send('ppe', simulator.ppe_message(step.get('box', 'AIBOX-1'), step['rois'], next(self.frames)))
 
     def face(self, step):   # Face-S: a PIN/person ID and a confidence
-        body = {'deviceId': step['device'], 'personId': step['person'], 'confidence': step.get('confidence', .97)}
         for _ in range(step.get('repeat', 1)):
-            self.send('generic', body if step.get('identical') else {**body, 'seq': next(self.frames)})
+            self.send('generic', simulator.face_message(step['device'], step['person'], step.get('confidence', .97), 0 if step.get('identical') else next(self.frames)))
 
     def plate(self, step):   # a plate camera; with `person`, a terminal that also reads the rider's face
-        body = {'deviceId': step['device'], 'plate': step['plate'], 'confidence': step.get('confidence', .99), 'seq': next(self.frames)}
-        if 'person' in step: body['personId'] = step['person']
-        self.send('generic', body)
+        self.send('generic', simulator.plate_message(step['device'], step['plate'], step.get('confidence', .99), step.get('person'), next(self.frames)))
+
+    def walkin(self, step):   # the guard registers a walk-in vehicle at the gate
+        self.must(self.call('POST', ROOT + '/visits/walk-in', {'plate': step['plate'], 'name': step.get('name', 'Walk-in')}), 'walk-in ' + step['plate'])
 
     def passage(self, step):   # the loop confirms the newest barrier command was passed: this is what opens a parking session
         commands = self.snapshot()['commands']
         if not commands: raise Mismatch('there is no barrier command to confirm a passage for')
         newest = max(commands, key=lambda c: c['createdUtc'])
         self.must(self.call('POST', f"{ROOT}/commands/{newest['id']}/simulate-passage", {}), 'confirm passage')
-
-    def walkin(self, step):   # the guard registers a walk-in vehicle at the gate
-        self.must(self.call('POST', ROOT + '/visits/walk-in', {'plate': step['plate'], 'name': step.get('name', 'Walk-in')}), 'walk-in ' + step['plate'])
 
     # ---- what must have happened ---------------------------------------------------------------
     def snapshot(self):

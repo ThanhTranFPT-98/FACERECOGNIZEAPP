@@ -614,6 +614,7 @@ dotnet run --project tests/ParkingSimulation.Tests
 python tests/integration_parking.py          # needs Debug build of API
 python tests/run_scenarios.py [K1 X2 …]      # CR-019: station plan §7 scenarios from tests/scenarios/*.yaml, prints ĐẠT / KHÔNG ĐẠT
 python tests/run_cloud_scenarios.py [S1 K10] # CR-019: scenarios that need a real DSA_Platform (PostgreSQL in Docker, own throw-away database)
+python tests/test_simulator.py               # CR-020: scripts/simulator.py (command-line devices, virtual barrier controller) against the real API
 $env:PARKING_FFMPEG='C:\tools\ffmpeg.exe'; python tests/integration_video.py   # CR-001 end-to-end (real ffmpeg, folder "cloud")
 python -m unittest discover -s AiService -p test_plate_service.py -v
 python -m unittest discover -s tests -p test_backup.py -v
@@ -753,6 +754,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-020 | 2026-10-30 | ThanhTranFPT-98 (station plan §6) | Device simulator for a running station: Face-S, AI box, plate cameras and a virtual barrier controller | High | Done, locally tested; no real device tried |
 | CR-019 | 2026-10-30 | ThanhTranFPT-98 (station plan §6, §7) | Scenario runner: device-message timelines in YAML, ĐẠT / KHÔNG ĐẠT | High | Done for what runs on a laptop: 11 scenarios run here, S1 and K10 run against a real DSA_Platform, 7 others point to the test that covers them; real 4 h run and the station PC are week 3 |
 | CR-018 | 2026-10-30 | ThanhTranFPT-98 (station plan §4.4, §5.4; decision 19/10) | PPE + FaceID paired by ROI and track; re-check before opening (`TRACK_CHANGED`) | High | Done, locally tested; the AI box message format is still to be confirmed with Dũng (Q-B) |
 | CR-017 | 2026-10-21 | ThanhTranFPT-98 (station plan §4.1, §5.2) | Master list from the FPT Cloud platform; personId shared with the cloud | High | Done; tested against a local DSA_Platform |
@@ -773,6 +775,19 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
 
+### CR-020 — Device simulator (station plan §6)
+- **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §6: "the whole flow device → station → Cloud must run on a laptop without hardware".
+- **Interpretation (what we built):** `scripts/simulator.py`, standard library plus PyYAML for `play`.
+  - `face`, `ppe`, `plate`: one message to the station's receiver (`--station`, `--key`). `ppe --roi L1=t-1:helmet,vest,-boots --roi L2=` sends a person in one ROI and an empty second ROI (the AI-box shape of CR-018); `plate --person` is a terminal that also reads the rider.
+  - `play <scenario.yaml>`: the device steps of a scenario against a running station (for a demo, with the UI open); checks and guard actions are skipped. The message builders are shared with `tests/run_scenarios.py`, so the runner and the simulator cannot drift apart.
+  - `bridge`: the **virtual barrier controller**. It answers `POST /commands` after `--delay` seconds and sends the lane heartbeat (`Closed`, vehicle present, healthy) that the station needs before it opens a **live** lane, then reports the passage after an acknowledged command. `--mode bad-ack` answers with the wrong command ID (the station records `Unknown`), `--mode offline` answers 503. Start the station with `Parking__EnableLiveBarrier=true Parking__BarrierUrl=http://127.0.0.1:8099 Parking__DeviceKey=…`.
+- **Acceptance criteria:** the station cannot tell the simulator from a device; a live lane opens through the virtual controller; a controller that misbehaves produces the same outcomes as a real one would.
+- **Design decision and why:** one script, no installation, no new server framework: it has to run on any laptop of the team. The heartbeat always says "vehicle present" (a real loop would not), which is what lets a lane open; it does not test the loop logic.
+- **Risks / edge cases:** the simulator proves our side of the contract, not the vendors' devices: the Face-S and I/O message formats stay open (Q-A, Q-E). A message resent with the same body is stored once by the receiver, so `face` and `plate` add a timestamp; the `identical: true` of a scenario step sends one fixed body on purpose.
+- **DB migration needed?** no.
+- **Status:** Done, locally tested.
+- **Result / verification (2026-10-30):** `tests/test_simulator.py` 4 passed against the real API: the command-line `ppe` + `face` open a live lane through the virtual controller (command `Acknowledged` and passage reported); `--mode bad-ack` gives `Unknown` and a Critical `BARRIER_OUTCOME_UNKNOWN` alert (this closes the K11 gap of CR-019); `play` of K1 decides Allow with PPE Ok; the ROI notation. The test found a real bug in the tool (it crashed printing `→` to a piped cp1252 console after sending), fixed. `run_scenarios.py` re-run after sharing the builders: 11 ĐẠT.
+
 ### CR-019 — Scenario runner (station plan §6, §7)
 - **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §6: "a runner plays a timeline of device messages and prints ĐẠT / KHÔNG ĐẠT, so week 3 only re-runs it".
 - **Interpretation (what we built):** `tests/run_scenarios.py` plays `tests/scenarios/*.yaml` against the real API (Debug build, temporary DB, fake barrier bridge; it reuses the `integration_parking.py` harness). A scenario names a `base` (`tests/scenarios/_base.yaml`: `cualo` = person flap lane with Face-S and an AI box ROI; `cong` = car entry and exit lanes with plate cameras; `xemay` = motorbike entry and exit lanes with a terminal that reads plate and rider), then a list of steps:
@@ -783,7 +798,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
   - **Run by `run_scenarios.py` (11):** K1, K2, K3, K5, K6, K7, K9, X1, X2, X3, X4.
   - **Run by `tests/run_cloud_scenarios.py` (2), against a real `DSA_Platform` on PostgreSQL:** S1 (master list down, version acknowledged) and K10 (the Cloud is stopped during traffic, then restarted; scaled to 30 s and 60 decisions by default, with the buffer size and send rate printed so the 72 h can be extrapolated). The platform gets a throw-away database in the dev container and drops it at the end; it needs Docker running.
   - **Pointed to the test that already covers them (7):** K4 and S3 and K11 and X5 (`integration_parking.py`), K8 and S2 (`ParkingCore.Tests`; K8 cannot be interleaved from outside because the automatic opening starts right after the decision), X6 (`load_test.py`).
-- **Gaps:** the Critical alert `BARRIER_OUTCOME_UNKNOWN` of K11 is raised by `Open()` but no test asserts it. The "silent device" alert of K7 needs a wait of 30 s or more and is covered by `test_monitoring_alerts_wall_and_device_health`. The real 4-hour outage of K10, X6 at the plan's load (100 vehicles in 15 min on 2 lanes) and everything on the real station PC belong to week 3.
+- **Gaps:** the "silent device" alert of K7 needs a wait of 30 s or more and is covered by `test_monitoring_alerts_wall_and_device_health`. The real 4-hour outage of K10, X6 at the plan's load (100 vehicles in 15 min on 2 lanes) and everything on the real station PC belong to week 3.
 - **Design decision and why:** self-contained setups instead of a seed of the real stations: the real lane count, directions and device IDs come from the survey (III.3) and are not in the plan. The runner starts a fresh API per scenario (about 4 s) so scenarios cannot affect each other.
 - **Status:** Done for what runs on a laptop. All 20 scenarios of plan §7 are accounted for.
 - **Result / verification (2026-10-30):**
