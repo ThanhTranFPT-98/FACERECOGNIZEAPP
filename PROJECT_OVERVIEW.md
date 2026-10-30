@@ -754,6 +754,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-021 | 2026-10-30 | ThanhTranFPT-98 (station plan §9) | Station as a Windows service, restart after a crash, scheduled SQLite backup | Medium | Scripts done and dry-run tested; never installed as a real service |
 | CR-020 | 2026-10-30 | ThanhTranFPT-98 (station plan §6) | Device simulator for a running station: Face-S, AI box, plate cameras and a virtual barrier controller | High | Done, locally tested; no real device tried |
 | CR-019 | 2026-10-30 | ThanhTranFPT-98 (station plan §6, §7) | Scenario runner: device-message timelines in YAML, ĐẠT / KHÔNG ĐẠT | High | Done for what runs on a laptop: 11 scenarios run here, S1 and K10 run against a real DSA_Platform, 7 others point to the test that covers them; real 4 h run and the station PC are week 3 |
 | CR-018 | 2026-10-30 | ThanhTranFPT-98 (station plan §4.4, §5.4; decision 19/10) | PPE + FaceID paired by ROI and track; re-check before opening (`TRACK_CHANGED`) | High | Done, locally tested; the AI box message format is still to be confirmed with Dũng (Q-B) |
@@ -774,6 +775,20 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-021 — Windows service and scheduled backup (station plan §9)
+- **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §9 (16–30/11): "install as a Windows service, start by itself, back up SQLite"; staging on the real station PC is V.3.
+- **Interpretation (what we built):**
+  - `Program.cs`: `UseWindowsService` with the name `DSAStation` (package `Microsoft.Extensions.Hosting.WindowsServices` 8.0.1). It does nothing when the API is started from a console, so every other way of running is unchanged; as a service the content root is the install folder, so `App_Data` and `appsettings` are found there.
+  - `scripts/Install-StationService.ps1`: creates the service (automatic, delayed start), restarts it after a crash (5 s, 5 s, then 30 s; failure count reset after a day; also when the process exits with an error), `-Uninstall` stops it first (so ffmpeg stops cleanly) and leaves `App_Data` alone. `-WhatIf` changes nothing.
+  - `scripts/Backup-Station.ps1`: runs `backup_sqlite.py` (consistent while the station runs, integrity-checked) into a timestamped file, keeps the newest `-Keep` (default 14) and removes older ones only after the new copy is verified; `-Register` adds a daily scheduled task (default 02:00, as SYSTEM). Evidence images and video are not in this backup.
+- **Acceptance criteria:** the API still starts from a console and in the tests; the service starts after boot and comes back after a crash or an update reboot (to check at staging); a backup never replaces or deletes the last good copy.
+- **Design decision and why:** a Windows service, not a console window or a scheduled "at logon" task: the station must run when nobody is logged in. No installer package: two scripts are easier to review and to run on a PC without internet.
+- **Risks / edge cases:** a Windows update restarts the PC (plan §10: configure active hours, use a UPS). If the service account cannot write to the install folder, SQLite and evidence writes fail: install under `C:\DSAStation` and grant the service account modify rights there. The backup task runs as SYSTEM; the backup folder should be on another disk.
+- **DB migration needed?** no.
+- **Status:** Scripts done; **not installed as a real service on any machine.**
+- **Result / verification (2026-10-30):** build, `dotnet publish -c Release` (produces `DSAVehicle.exe` and the hosting DLL), `ParkingCore.Tests` 228 passed, `run_scenarios.py` K1 and X1 ĐẠT from a console. Both scripts parse without errors; `Install-StationService.ps1 -WhatIf` and `-Uninstall -WhatIf` changed nothing (no service afterwards); `Backup-Station.ps1` against a temporary database made three backups with `-Keep 2` and kept exactly the newest two; `-Register -WhatIf` registered nothing.
+- **Not done / to check at staging (V.3):** real installation, start after a reboot, restart after killing the process, the service account's rights, 48 hours of continuous running.
 
 ### CR-020 — Device simulator (station plan §6)
 - **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §6: "the whole flow device → station → Cloud must run on a laptop without hardware".

@@ -104,6 +104,8 @@ Build the UI with `npm run build` and the API with `dotnet publish -c Release`. 
 
 Use one API process per site/database. Database migrations run during startup; take backups before upgrades. SQL Server migrations were generated and their SQL script validated, but no SQL Server instance was available for an execution test. SQLite migrations and persistence were exercised in integration tests.
 
+As a Windows service (CR-021): `dotnet publish DSAVehicle -c Release -o C:\DSAStationpp`, put the secrets in `appsettings.Production.json` there, then from an elevated PowerShell `scripts\Install-StationService.ps1 -PublishDir C:\DSAStationpp -Urls http://0.0.0.0:5085` (add `-WhatIf` to see what it does; `-Uninstall` removes it). The service starts after boot, restarts after a crash and stops ffmpeg cleanly when stopped. Daily database backup: `scripts\Backup-Station.ps1 -Database C:\DSAStationpp\App_Data\parking.db -Destination D:\DSABackups -Keep 14 -Register`. Evidence images and video need their own backup. These scripts have not been run on a real station PC yet.
+
 Neither the UI build nor API tests constitute a physical installation test. Follow `PILOT_RUNBOOK.md` and `BARRIER_BRIDGE.md` before activating a real lane.
 
 ## Reference documentation

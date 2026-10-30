@@ -17,6 +17,9 @@ namespace DSAVehicle
         public static async Task Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            // Station plan §9: runs as the Windows service "DSAStation" (scripts/Install-StationService.ps1). Does nothing when started from a console.
+            // As a service the content root becomes the install folder, so App_Data and appsettings are found there.
+            builder.Host.UseWindowsService(options => options.ServiceName = "DSAStation");
             builder.AddParking();
 
             // Fixed application name: the default ties encrypted data (camera sources,
