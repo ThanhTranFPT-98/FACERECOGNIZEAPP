@@ -1,0 +1,12 @@
+{
+  "match": [{ "path": "event", "equals": "verify" }],
+  "fields": {
+    "deviceId": "$.device.sn",
+    "channel": "channel",
+    "personId": { "path": "pin", "transform": ["trim", "upper"] },
+    "confidence": { "path": "score", "scale": 100 },
+    "capturedUtc": { "path": "time", "time": "iso" },
+    "overviewImage": { "path": "photo", "image": "base64" },
+    "rawKey": "eventId"
+  }
+}

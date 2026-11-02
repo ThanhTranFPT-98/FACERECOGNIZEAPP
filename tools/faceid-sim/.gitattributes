@@ -1,0 +1,2 @@
+# Run inside WSL/Linux: CRLF would break bash (": command not found").
+*.sh text eol=lf

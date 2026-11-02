@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FaceID Simulator</title>
+<style>
+:root {
+  --bg: #f5f5f3; --surface: #fff; --text: #1d1d1b; --muted: #66665f; --line: #e0dfda;
+  --accent: #1f5fbf; --ok: #1b7a43; --ok-soft: #e4f4ea; --warn: #9a5b00; --warn-soft: #fbf0dc; --bad: #b42318; --bad-soft: #fbe6e4;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --surface: #1f1f1d; --text: #ecebe6; --muted: #a3a29b; --line: #34332f;
+    --accent: #7aa7ee; --ok: #6cc893; --ok-soft: #173024; --warn: #e6b35c; --warn-soft: #33270f; --bad: #f08a80; --bad-soft: #3a1c19; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+header h1 { font-size: 1.1rem; margin: 0; }
+.pill { font-size: .8rem; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pill.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.pill.bad { color: var(--bad); background: var(--bad-soft); border-color: transparent; }
+main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+section h2 { font-size: .95rem; margin: 0 0 10px; }
+.stage { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4 / 3; }
+.stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.verdict { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg); min-height: 46px; font-weight: 600; }
+.verdict.ok { background: var(--ok-soft); color: var(--ok); }
+.verdict.warn { background: var(--warn-soft); color: var(--warn); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+input[type=text] { font: inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); min-width: 0; flex: 1; }
+button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+button:disabled { opacity: .5; cursor: default; }
+.side { display: grid; gap: 16px; align-content: start; }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.muted { color: var(--muted); font-size: .85rem; }
+.s-sent { color: var(--ok); } .s-retrying, .s-queued { color: var(--warn); } .s-refused { color: var(--bad); }
+.thumbs { display: flex; gap: 4px; flex-wrap: wrap; }
+.thumbs img { width: 54px; height: 54px; object-fit: cover; border-radius: 4px; }
+code { font-size: .85em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DSA FaceID Simulator</h1>
+  <span class="pill" id="device">…</span>
+  <span class="pill" id="station">Trạm: …</span>
+  <span class="pill" id="backlog">Hàng đợi: 0</span>
+  <span class="muted" id="config"></span>
+</header>
+<main>
+  <section>
+    <h2>Camera của thiết bị</h2>
+    <div class="stage"><video id="video" autoplay muted playsinline></video><canvas id="overlay"></canvas></div>
+    <div class="verdict" id="verdict">Đang mở webcam…</div>
+    <div class="row">
+      <button id="toggle">Tạm dừng nhận diện</button>
+      <span class="muted" id="fps"></span>
+    </div>
+  </section>
+  <div class="side">
+    <section>
+      <h2>Đăng ký khuôn mặt (bộ nhớ thiết bị)</h2>
+      <div class="row"><input type="text" id="pin" placeholder="PIN, ví dụ 0007" maxlength="20"><input type="text" id="name" placeholder="Họ tên" maxlength="100"></div>
+      <div class="row"><button class="primary" id="enroll">Chụp 5 ảnh và đăng ký</button><span class="muted" id="enrollMsg"></span></div>
+      <div class="thumbs" id="thumbs"></div>
+      <p class="muted">Nhìn thẳng, rồi hơi quay trái/phải giữa các lần chụp. Mỗi ảnh chỉ được có một khuôn mặt. PIN này phải được khai báo trên Cloud: người → FaceId <code id="srcHint">faceid-sim</code> / PIN.</p>
+      <table><thead><tr><th>PIN</th><th>Tên</th><th>Mẫu</th><th></th></tr></thead><tbody id="people"></tbody></table>
+    </section>
+    <section>
+      <h2>Sự kiện đã gửi lên trạm</h2>
+      <table><thead><tr><th>#</th><th>Giờ</th><th>PIN</th><th>Điểm</th><th>Trạng thái</th></tr></thead><tbody id="events"></tbody></table>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
+const grab = document.createElement("canvas");
+let running = true, inflight = false, frames = 0, lastFpsAt = performance.now();
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    $("verdict").textContent = "Đứng trước camera.";
+    loop();
+  } catch (e) {
+    $("verdict").className = "verdict warn";
+    $("verdict").textContent = "Không mở được webcam: " + e.message + ". Mở trang bằng http://localhost:8095 (trình duyệt chỉ cho dùng camera trên localhost hoặc https) và cho phép quyền camera.";
+  }
+}
+
+function snapshot(quality = 0.8) {
+  grab.width = video.videoWidth; grab.height = video.videoHeight;
+  grab.getContext("2d").drawImage(video, 0, 0);
+  return new Promise(resolve => grab.toBlob(resolve, "image/jpeg", quality));
+}
+
+function draw(result) {
+  overlay.width = result.width; overlay.height = result.height;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  ctx.lineWidth = Math.max(2, result.width / 320);
+  ctx.font = `${Math.round(result.width / 40)}px system-ui, sans-serif`;
+  for (const f of result.faces) {
+    const [x1, y1, x2, y2] = f.box;
+    const color = !f.primary ? "#9a9a92" : f.known ? "#2fbf71" : "#e8a33d";
+    ctx.strokeStyle = color; ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    const label = !f.primary ? (f.tooSmall ? "xa quá" : "bỏ qua") : f.known ? `${f.pin} · ${f.name} · ${f.score}` : `người lạ · ${f.score}`;
+    const w = ctx.measureText(label).width + 12, h = parseInt(ctx.font) + 8;
+    ctx.fillStyle = color; ctx.fillRect(x1, Math.max(0, y1 - h), w, h);
+    ctx.fillStyle = "#000"; ctx.fillText(label, x1 + 6, Math.max(h - 6, y1 - 6));
+  }
+  const p = result.progress, v = $("verdict");
+  if (result.event) {
+    v.className = "verdict ok";
+    v.textContent = result.event.pin === "STRANGER" ? `Đã gửi: NGƯỜI LẠ (điểm ${result.event.score})` : `Đã gửi lên trạm: PIN ${result.event.pin} (điểm ${result.event.score})`;
+  } else if (!p.label) {
+    v.className = "verdict"; v.textContent = result.faces.length ? "Lại gần camera hơn." : "Không thấy khuôn mặt.";
+  } else if (p.seen < p.needed) {
+    v.className = "verdict warn"; v.textContent = `Đang xác nhận ${p.label === "STRANGER" ? "người lạ" : "PIN " + p.label}… ${p.seen}/${p.needed}`;
+  }
+}
+
+async function loop() {
+  if (running && !inflight && video.readyState >= 2) {
+    inflight = true;
+    try {
+      const blob = await snapshot();
+      const r = await fetch("/api/frame", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+      if (r.ok) { const result = await r.json(); draw(result); if (result.event) refreshEvents(); frames++; }
+    } catch (e) { $("verdict").textContent = "Lỗi xử lý: " + e.message; }
+    inflight = false;
+  }
+  const now = performance.now();
+  if (now - lastFpsAt > 2000) { $("fps").textContent = (frames * 1000 / (now - lastFpsAt)).toFixed(1) + " khung hình/giây được nhận diện"; frames = 0; lastFpsAt = now; }
+  setTimeout(loop, 120);
+}
+
+$("toggle").onclick = () => {
+  running = !running;
+  $("toggle").textContent = running ? "Tạm dừng nhận diện" : "Tiếp tục nhận diện";
+  if (!running) { ctx.clearRect(0, 0, overlay.width, overlay.height); $("verdict").className = "verdict"; $("verdict").textContent = "Đã tạm dừng."; }
+};
+
+$("enroll").onclick = async () => {
+  const pin = $("pin").value.trim(), name = $("name").value.trim();
+  if (!pin) { $("enrollMsg").textContent = "Nhập PIN trước."; return; }
+  const button = $("enroll"); button.disabled = true; running = false; $("thumbs").innerHTML = "";
+  const form = new FormData(); form.append("pin", pin); form.append("name", name);
+  for (let i = 0; i < 5; i++) {
+    $("enrollMsg").textContent = `Chụp ${i + 1}/5…`;
+    await new Promise(r => setTimeout(r, 700));
+    const blob = await snapshot(0.92);
+    form.append("photos", blob, `shot${i}.jpg`);
+    const img = document.createElement("img"); img.src = URL.createObjectURL(blob); $("thumbs").appendChild(img);
+  }
+  $("enrollMsg").textContent = "Đang trích xuất đặc trưng…";
+  try {
+    const r = await fetch("/api/enroll", { method: "POST", body: form });
+    const body = await r.json();
+    $("enrollMsg").textContent = r.ok ? `Đã lưu PIN ${body.person.pin}: ${body.used} ảnh dùng được, ${body.rejected} ảnh bị loại.` : (body.detail || "Lỗi");
+    if (r.ok) { $("pin").value = ""; $("name").value = ""; refreshPeople(); }
+  } catch (e) { $("enrollMsg").textContent = "Lỗi: " + e.message; }
+  button.disabled = false; running = true;
+};
+
+async function refreshPeople() {
+  const people = await (await fetch("/api/people")).json();
+  $("people").innerHTML = people.map(p => `<tr><td><b>${esc(p.pin)}</b></td><td>${esc(p.name)}</td><td>${p.samples}</td><td><button data-pin="${esc(p.pin)}">Xoá</button></td></tr>`).join("")
+    || `<tr><td colspan="4" class="muted">Chưa có ai. Đăng ký ở trên.</td></tr>`;
+  $("people").querySelectorAll("button").forEach(b => b.onclick = async () => {
+    if (!confirm(`Xoá khuôn mặt PIN ${b.dataset.pin} khỏi thiết bị?`)) return;
+    await fetch("/api/people/" + encodeURIComponent(b.dataset.pin), { method: "DELETE" }); refreshPeople();
+  });
+}
+
+const STATUS_TEXT = { sent: "đã nhận", queued: "chờ gửi", retrying: "đang thử lại", refused: "bị từ chối" };
+async function refreshEvents() {
+  const events = await (await fetch("/api/events")).json();
+  $("events").innerHTML = events.slice(0, 25).map(e => `<tr title="${esc(e.detail)}"><td>${e.id}</td><td>${esc(e.created.slice(11, 19))}</td><td>${e.pin === "STRANGER" ? "người lạ" : esc(e.pin)}</td><td>${e.score}</td><td class="s-${e.status}">${STATUS_TEXT[e.status] || e.status}${e.status !== "sent" ? "<br><span class='muted'>" + esc(e.detail) + "</span>" : ""}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">Chưa có sự kiện.</td></tr>`;
+}
+
+async function refreshStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    $("device").textContent = `Thiết bị ${s.deviceId} · kênh ${s.channel}`;
+    $("srcHint").textContent = s.profile;
+    const hb = s.heartbeat, st = $("station");
+    st.className = "pill " + (hb.ok ? "ok" : hb.ok === false ? "bad" : "");
+    st.textContent = !s.receiverKeySet ? "Trạm: chưa đặt FACESIM_RECEIVER_KEY" : hb.ok ? "Trạm: kết nối tốt" : `Trạm: lỗi (${hb.detail})`;
+    st.title = s.receiver;
+    $("backlog").textContent = "Hàng đợi: " + s.backlog;
+    $("config").textContent = `ngưỡng ${s.threshold} · ${s.stableFrames} khung hình · nghỉ ${s.cooldownSeconds}s · ${s.people} người`;
+  } catch { $("station").className = "pill bad"; $("station").textContent = "Simulator không phản hồi"; }
+}
+
+startCamera(); refreshPeople(); refreshEvents(); refreshStatus();
+setInterval(refreshStatus, 5000); setInterval(refreshEvents, 5000);
+</script>
+</body>
+</html>

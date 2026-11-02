@@ -2,13 +2,13 @@
    Keep in sync with src/theme.js. Pages use these vars for inline colours. */
 :root {
   color-scheme: dark;
-  --bg-base: #061426;
-  --bg-surface: #0c1e33;
-  --bg-nav: #040f1d;
-  --bg-hover: #12283f;
-  --bg-raised: #16304a;
-  --border: #273141;
-  --border-sub: #1a212c;
+  --bg-base: #0b2447;      /* station navy, see theme.js */
+  --bg-surface: #12315c;
+  --bg-nav: #081c38;
+  --bg-hover: #183c6c;
+  --bg-raised: #1d4577;
+  --border: #2b4a75;
+  --border-sub: #1f3d66;
   --fg: #e6edf3;
   --fg-muted: #8b949e;
   --fg-strong: #f0f6fc;
@@ -19,8 +19,8 @@
   --warning: #d29922;
   --video-bg: #010409;
   --bg-sheen:
-    radial-gradient(1200px 620px at 12% -8%, rgba(56, 132, 214, .22), transparent 62%),
-    radial-gradient(980px 560px at 88% 108%, rgba(10, 32, 58, .60), transparent 60%);
+    radial-gradient(1200px 620px at 12% -8%, rgba(56, 132, 214, .28), transparent 62%),
+    radial-gradient(980px 560px at 88% 108%, rgba(6, 22, 48, .55), transparent 60%);
 }
 
 /* Light theme — platform's [data-theme="light"] values. */

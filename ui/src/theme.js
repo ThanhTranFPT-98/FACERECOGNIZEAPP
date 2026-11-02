@@ -4,13 +4,14 @@ import { theme } from 'antd'
 // DSA Vehicle reports into that platform, so both products must share the company
 // colours. Change a value here and in styles.css together.
 export const palettes = {
+  // Station navy (customer request 2026-11-03): a clearly blue background, also used by the platform's station event view (NAVY in stationEvents.jsx).
   dark: {
-    bgBase: '#061426',
-    bgSurface: '#0c1e33',
-    bgNav: '#040f1d',
-    bgHover: '#12283f',
-    border: '#273141',
-    borderSub: '#1a212c',
+    bgBase: '#0b2447',
+    bgSurface: '#12315c',
+    bgNav: '#081c38',
+    bgHover: '#183c6c',
+    border: '#2b4a75',
+    borderSub: '#1f3d66',
     fg: '#e6edf3',
     fgMuted: '#8b949e',
     fgStrong: '#f0f6fc',
@@ -23,7 +24,7 @@ export const palettes = {
     warning: '#d29922',
     // Cyan is light, so text on it must be dark navy to stay readable.
     onAccent: '#061426',
-    headerBg: 'rgba(5, 16, 32, 0.6)',
+    headerBg: 'rgba(8, 28, 56, 0.72)',
   },
   light: {
     bgBase: '#f6f8fa',

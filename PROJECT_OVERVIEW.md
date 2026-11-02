@@ -754,6 +754,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-022 | 2026-11-02 | ThanhTranFPT-98 | FaceID demo: simulated face terminal (until the vendor SDK arrives), pedestrian lane, station UI in navy | High | Done; tested end to end against the FPT Cloud platform |
 | CR-021 | 2026-10-30 | ThanhTranFPT-98 (station plan §9) | Station as a Windows service, restart after a crash, scheduled SQLite backup | Medium | Scripts done and dry-run tested; never installed as a real service |
 | CR-020 | 2026-10-30 | ThanhTranFPT-98 (station plan §6) | Device simulator for a running station: Face-S, AI box, plate cameras and a virtual barrier controller | High | Done, locally tested; no real device tried |
 | CR-019 | 2026-10-30 | ThanhTranFPT-98 (station plan §6, §7) | Scenario runner: device-message timelines in YAML, ĐẠT / KHÔNG ĐẠT | High | Done for what runs on a laptop: 11 scenarios run here, S1 and K10 run against a real DSA_Platform, 7 others point to the test that covers them; real 4 h run and the station PC are week 3 |
@@ -775,6 +776,22 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-022 — FaceID demo: simulated face terminal, pedestrian lane, station navy
+- **Date / requested by:** 2026-11-02, ThanhTranFPT-98. "Simulate the station's connection to the platform with a face recognition demo, using the current face recognition system; the FaceID device SDK replaces it later." Decisions 02/11: pedestrian lane, face only; faces enrolled **on the simulator** like a real terminal; known people open automatically (a simulated open signal, no barrier); runs on a laptop in WSL2 with its webcam. 03/11: station UI background dark blue.
+- **Interpretation (what we built):** no change to the station's decision code; the simulator is just another device. It complements CR-020 (`scripts/simulator.py`: command-line devices without a camera, and the virtual barrier controller that can confirm passage).
+  - `tools/faceid-sim/` (laptop only, not in the station package): a Python process that plays a Face-S terminal. It reuses AiService's SCRFD + ArcFace code and weights, keeps enrolled faces by **PIN** in its own folder (`~/.local/share/dsa-faceid-sim`), and sends **results only** (PIN, score 0–100, ISO time, face photo, event ID) to `/api/v1/parking/receiver/faceid-sim`. One event per presentation: the same answer on 3 frames in a row, once while the person stays, then 10 s per PIN (15 s for strangers). Unknown face → PIN `STRANGER` (never mapped, so guard review + `UNKNOWN_PERSON`). Heartbeat every 30 s keeps the camera alive. In-order buffered sender with back-off; 4xx is final.
+  - The browser holds the webcam and posts JPEG frames (WSL2 has no camera); UI on port 8095 (8090 is often taken by other local services).
+  - `station/faceid-sim.profile.json` (CR-015 profile), `station/setup_station.py` (profile, lane `PED-IN` Person/FaceOnly/simulated/auto-open, camera `FACESIM-01`, through the admin API with CSRF), `station/tram-wsl.sh` (runs the station in WSL from a copy on the Linux disk; creates `Receiver:Key` and the admin password once), `station/diag.py`.
+  - The cloud owns people: FaceId `faceid-sim/<PIN>` on the platform → `PersonIdentity` through CR-017.
+  - UI: the dark palette is navy (`#0b2447`), same tone as the platform's station event view.
+- **Acceptance criteria:** a known face on the lane gives `Allow` + a `Simulated` open command and reaches the cloud with its photo; an unknown or unmapped PIN never opens; replacing the simulator by a vendor connector needs no change in the station or the cloud.
+- **Design decision and why; alternatives rejected:** reusing the station's own `/face/recognize` path (legacy face subsystem, its own embeddings table) was rejected: it bypasses the device/identity mapping a real terminal will use, and its people are not the cloud's. The simulator speaks a terminal-like JSON read through a profile, exactly as the vendor device will.
+- **Risks / edge cases:** no liveness (a phone photo may pass) — demo only. Lane threshold 0.55 and `TrustedConfidence` 1.0 are set by `setup_station.py` for the demo, not evaluated on site. The demo lane sits in the default location, so events carry area `DEFAULT`. A simulated lane needs *Simulate passage* in the UI before a `passage` is sent.
+- **DB migration needed?** no.
+- **Status:** Done.
+- **Result / verification (2026-11-02/03):** `tools/faceid-sim` unit tests 11 passed (pass detection, gallery, message format against the profile). Models in WSL: detection ~45 ms, embedding ~65 ms per frame. Local station (Platform disabled): profile/lane/camera created; wrong receiver key 401; heartbeat marks the camera alive; unmapped PIN → `ManualReview` + `UNKNOWN_PERSON:faceid-sim/0007` with photo; mapped PIN → `Allow` + `Simulated` command. Against the FPT Cloud platform with a real webcam: person 101 / `faceid-sim/007` pulled as master v1, pass → `Allow` (0.873) on the station and on the cloud with its photo.
+- **Not done:** an I/O bridge simulator that confirms passage automatically; liveness.
 
 ### CR-021 — Windows service and scheduled backup (station plan §9)
 - **Date / requested by:** 2026-10-30, ThanhTranFPT-98. Plan §9 (16–30/11): "install as a Windows service, start by itself, back up SQLite"; staging on the real station PC is V.3.
