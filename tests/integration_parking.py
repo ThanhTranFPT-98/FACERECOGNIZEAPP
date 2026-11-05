@@ -283,6 +283,77 @@ class ParkingIntegration(unittest.TestCase):
         self.assertEqual(self.call('POST', root + '/vehicles', {'plate': '30A-123.45', 'owner': 'Local', 'kind': 'Car'})[0], 409)
         print('Verified site timing defaults, lane overrides, bounds, audit, roles and plate formats.')
 
+    def test_lane_name_and_kind(self):
+        # CR-023: display name and kind, used by the camera wall and the lane setup.
+        root = '/api/v1/parking'
+        self.call('POST', '/api/auth/login', {'username': 'admin', 'password': self.password})
+        lane = {'id': 'moto-in-1', 'name': 'Làn xe máy 1', 'kind': 'Motorbike', 'direction': 'Entry', 'policy': 'PlateOnly',
+                'plateThreshold': .92, 'faceThreshold': .8, 'shadowMode': True, 'simulation': True, 'subject': 'Vehicle'}
+        self.assertEqual(self.call('PUT', root + '/lanes', lane)[0], 200)
+        saved = next(l for l in self.call('GET', root + '/snapshot')[1]['lanes'] if l['id'] == 'moto-in-1')
+        self.assertEqual((saved['name'], saved['kind']), ('Làn xe máy 1', 'Motorbike'))
+        self.assertEqual(self.call('PUT', root + '/lanes', {**lane, 'kind': 'Truck'})[0], 400)
+        self.assertEqual(self.call('PUT', root + '/lanes', {**lane, 'kind': 'Person'})[0], 409)  # a person lane must also decide by face
+        # Older clients send neither field: the lane keeps working with no name and a kind derived from its subject.
+        legacy = {k: v for k, v in lane.items() if k not in ('name', 'kind')}
+        self.assertEqual(self.call('PUT', root + '/lanes', legacy)[0], 200)
+        saved = next(l for l in self.call('GET', root + '/snapshot')[1]['lanes'] if l['id'] == 'moto-in-1')
+        self.assertEqual((saved['name'], saved['kind']), (None, None))
+        # BUG-009: times read back from SQLite are UTC and must say so, or browsers show them 7 h off.
+        self.assertTrue(all(a['createdUtc'].endswith('Z') for a in self.call('GET', root + '/audit')[1]))
+        print('Verified lane name and kind: saved, validated, optional; times in UTC.')
+
+    def test_public_display(self):
+        # CR-024: a public PPE screen (TV) reads its state with its own key; PPE results per camera, never names.
+        root = '/api/v1/parking'
+        receiver = secrets.token_urlsafe(32)
+        self.env['Receiver__Key'] = receiver
+        self.process.terminate(); self.process.wait(timeout=10); self.start()
+        self.login_as('admin')
+        lane = {'id': 'door-32', 'name': 'Cửa lò +32', 'kind': 'Person', 'direction': 'Entry', 'policy': 'FaceOnly', 'plateThreshold': .9, 'faceThreshold': .8,
+                'shadowMode': True, 'simulation': True, 'subject': 'Person', 'ppeRules': 'helmet=required,vest=warn', 'ppeMissingMode': 'Review'}
+        self.assertEqual(self.call('PUT', root + '/lanes', lane)[0], 200)
+        for cam, roi in [('ppe-1', 'D1'), ('ppe-2', 'D2')]:
+            self.assertEqual(self.call('PUT', root + '/cameras', {'id': cam, 'name': cam, 'laneId': 'door-32', 'externalDevice': 'AIBOX-9', 'externalRoi': roi})[0], 200)
+        screen = {'id': 'TV-1', 'name': 'TV cửa lò', 'laneId': 'door-32', 'title': 'CỬA LÒ +32', 'cameras': [{'id': 'ppe-1', 'name': 'Trái'}, {'id': 'ppe-2', 'name': 'Phải'}],
+                  'zoom': 1.8, 'holdSeconds': 5, 'sound': 'off'}
+        self.assertEqual(self.call('PUT', root + '/displays', {**screen, 'cameras': [{'id': 'cam-elsewhere', 'name': 'x'}]})[0], 409)  # not on this lane
+        status, saved = self.call('PUT', root + '/displays', screen)
+        self.assertEqual(status, 200)
+        key = saved['key']
+        self.assertTrue(len(key) >= 32)
+        # The TV has no session: only the key opens the state.
+        anonymous = urllib.request.build_opener()
+        def state(k):
+            try:
+                with anonymous.open(f'{self.base}{root}/display/TV-1/state?key={k}', timeout=10) as r: return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e: return e.code, None
+        self.assertEqual(state('wrong')[0], 401)
+        status, body = state(key)
+        self.assertEqual((status, [c['state'] for c in body['cameras']]), (200, ['idle', 'idle']))
+        self.assertEqual(body['config']['rules'], {'helmet': 'required', 'vest': 'warn'})
+        # ROI D1: no helmet (with a person box); D2: helmet but no vest (warn-only).
+        self.post_raw(f'{self.base}{root}/receiver/ppe?key={receiver}', {'deviceId': 'AIBOX-9', 'channel': '1', 'frame': 1, 'rois': [
+            {'roiId': 'D1', 'tracks': [{'trackId': 't1', 'items': {'helmet': False, 'vest': True}, 'box': [.3, .2, .2, .6]}]},
+            {'roiId': 'D2', 'tracks': [{'trackId': 't2', 'items': {'helmet': True, 'vest': False}}]}]})
+        for _ in range(80):
+            status, body = state(key)
+            if body['cameras'][0]['state'] != 'idle': break
+            time.sleep(.1)
+        one, two = body['cameras']
+        self.assertEqual((one['state'], one['missing'], one['box']), ('violation', ['helmet'], [.3, .2, .2, .6]))
+        self.assertEqual((two['state'], two['missing']), ('warning', ['vest']))
+        self.assertFalse({'personId', 'name', 'subjectName', 'trackId'} & {k for c in body['cameras'] for k in c})  # results only: no person ID or name
+        seen = next(d for d in self.call('GET', root + '/displays')[1] if d['id'] == 'TV-1')
+        self.assertIsNotNone(seen['lastSeenUtc'])
+        # A new key disconnects the old address; a guard cannot manage screens.
+        self.assertEqual(self.call('POST', root + '/displays/TV-1/rekey', {})[0], 200)
+        self.assertEqual(state(key)[0], 401)
+        self.assertEqual(self.call('POST', '/api/auth/users', {'username': 'Guard', 'password': self.password, 'role': 'Guard'})[0], 200)
+        self.login_as('Guard')
+        self.assertEqual(self.call('GET', root + '/displays')[0], 403)
+        print('Verified public screen: key, per-camera PPE state with box, warn-only amber, rekey, permissions.')
+
     def login_as(self, username):
         # Fresh cookie jar per account, so two sessions can exist side by side.
         self.jar = http.cookiejar.CookieJar()

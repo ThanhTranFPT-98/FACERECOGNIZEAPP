@@ -36,6 +36,8 @@ public class VisitInput
 public class LaneInput
 {
     [Required, RegularExpression("^[a-zA-Z0-9_-]{1,40}$")] public string Id { get; set; } = "";
+    [StringLength(100)] public string? Name { get; set; }
+    [RegularExpression("^(Car|Motorbike|Person)$")] public string? Kind { get; set; }
     [RegularExpression("^(Entry|Exit)$")] public string Direction { get; set; } = "Entry";
     [RegularExpression("^(PlateOnly|FaceOnly|Either|Both|ManualReview)$")] public string Policy { get; set; } = "PlateOnly";
     [Range(.01, 1)] public double PlateThreshold { get; set; } = .95;
@@ -181,6 +183,8 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
         if (PpeRules.Check(input.PpeRules) is string ppeError) throw new InvalidOperationException(ppeError);
         if (input.Subject == "Person" && input.Policy is not ("FaceOnly" or "ManualReview")) throw new InvalidOperationException("A person lane decides by face: use the FaceOnly or ManualReview policy.");
         lane.ExitRequiresEntry = input.ExitRequiresEntry; lane.RequireInspectionPhoto = input.RequireInspectionPhoto;
+        if ((input.Kind == "Person") != (input.Subject == "Person") && input.Kind is not null) throw new InvalidOperationException("A person lane has kind Person and subject Person.");
+        lane.Name = string.IsNullOrWhiteSpace(input.Name) ? null : input.Name.Trim(); lane.Kind = input.Kind;
         lane.Subject = input.Subject; lane.PpeRules = string.IsNullOrWhiteSpace(input.PpeRules) ? null : input.PpeRules.Trim(); lane.PpeMissingMode = input.PpeMissingMode;
         if (input.LocationId.HasValue && !await db.Locations.AnyAsync(x => x.Id == input.LocationId)) throw new InvalidOperationException("Location not found.");
         lane.LocationId = input.LocationId ?? lane.LocationId ?? (await AreaCatalog.EnsureDefault(db)).Id;

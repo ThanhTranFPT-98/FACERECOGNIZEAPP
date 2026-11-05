@@ -31,6 +31,10 @@ public class Location
 public class Lane
 {
     [MaxLength(40)] public string Id { get; set; } = "entry-1";
+    // CR-023: what the guard reads on the camera wall ("Làn ô tô 1"); null = show the ID.
+    [MaxLength(100)] public string? Name { get; set; }
+    // CR-023: Car | Motorbike | Person, so the wall can group lanes; null = derived from Subject.
+    [MaxLength(20)] public string? Kind { get; set; }
     public Guid? LocationId { get; set; }
     public string Direction { get; set; } = "Entry";
     public string Policy { get; set; } = "PlateOnly";
@@ -223,6 +227,7 @@ public class ParkingDb : DbContext
     public DbSet<SyncCursor> SyncCursors => Set<SyncCursor>();
     public DbSet<DeviceProfile> DeviceProfiles => Set<DeviceProfile>();
     public DbSet<PersonIdentity> PersonIdentities => Set<PersonIdentity>();
+    public DbSet<PublicDisplay> PublicDisplays => Set<PublicDisplay>();
     // A missing row (fresh test database) means the built-in defaults.
     public async Task<SiteSettings> Site(CancellationToken cancellation = default) =>
         await SiteSettings.AsNoTracking().SingleOrDefaultAsync(cancellation) ?? new();

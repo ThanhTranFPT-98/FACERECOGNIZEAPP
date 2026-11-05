@@ -12,12 +12,16 @@ namespace DSAVehicle.ParkingCore;
 [Authorize(Policy = Perm.ViewLive)]
 public class ParkingHub : Hub { }
 
+
 public static class ParkingSetup
 {
     public static void AddParking(this WebApplicationBuilder builder)
     {
         var directory = Path.Combine(builder.Environment.ContentRootPath, "App_Data");
         Directory.CreateDirectory(directory);
+        // BUG-009: SQLite gives DateTime back without a kind, so the API wrote it without "Z" and browsers read UTC as local time.
+        // Every stored DateTime is UTC: write it with "Z" (MVC uses Newtonsoft.Json here, see Program.cs).
+        builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcNewtonsoftJsonOptions>(options => options.SerializerSettings.DateTimeZoneHandling = Newtonsoft.Json.DateTimeZoneHandling.Utc);
         var cloud = CloudOptions.From(builder.Configuration);
         var video = VideoOptions.From(builder.Configuration);
         var platform = PlatformOptions.From(builder.Configuration);

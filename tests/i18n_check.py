@@ -7,7 +7,7 @@ import json, re, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / 'ui' / 'src'
-FILES = ['pages/Parking/Parking.jsx', 'pages/Parking/DeviceInputs.jsx', 'components/Layout/MainLayout.jsx', 'contexts/AuthContext.jsx']
+FILES = ['pages/Parking/Parking.jsx', 'pages/Parking/DeviceInputs.jsx', 'pages/Parking/VideoWall.jsx', 'pages/Parking/LaneSetup.jsx', 'pages/Parking/AccessLog.jsx', 'pages/Parking/DisplaySettings.jsx', 'pages/Display/PublicDisplay.jsx', 'components/Layout/MainLayout.jsx', 'contexts/AuthContext.jsx']
 # Values shown through t() at runtime (codes from the API), which can't be found by reading the source.
 RUNTIME_CODES = ['Allow', 'Deny', 'ManualReview', 'Open', 'Acknowledged', 'Resolved', 'FalseAlarm', 'Critical', 'High', 'Medium', 'Low',
     'Entry', 'Exit', 'Vehicle', 'Person', 'Car', 'Motorcycle', 'Registered', 'Guest', 'Delivery', 'Visit', 'WalkIn',

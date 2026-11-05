@@ -656,6 +656,7 @@ python tests/i18n_check.py                   # every UI text has a Vietnamese en
 
 | ID | Date | Title | Area | Severity | Status |
 | --- | --- | --- | --- | --- | --- |
+| BUG-009 | 2026-11-05 | Station UI showed every time 7 h off (UTC read as local) | API / UI | Medium | Fixed |
 | BUG-008 | 2026-09-24 | Hard-killed API leaves ffmpeg recording until next start | Video | Low | By design (mitigated) |
 | BUG-007 | 2026-09-24 | Temporary .NET SDK in %TEMP% partly deleted → build/migrations fail | Env | High | Workaround |
 | BUG-006 | 2026-09-24 | Invalid webhook URL throws on every maintenance tick | Backend / Maintenance | Low | Open |
@@ -683,6 +684,15 @@ python tests/i18n_check.py                   # every UI text has a Vietnamese en
 - **How to recognise it again:** <error signature an agent can grep for>
 - **Related:** <BUG/CR IDs>
 ```
+
+### BUG-009 — Station UI showed every time 7 h off (UTC read as local)
+- **Date found:** 2026-11-05 · **Found by:** agent, taking report screenshots (CR-024) · **Area:** API / UI
+- **Severity:** Medium · **Status:** Fixed
+- **Symptom:** times on the station screens (events, alerts, audit, last heartbeat) were 7 h behind the wall clock in Việt Nam; the new camera wall and lane setup (CR-023) took every camera for offline, because "last segment 3 minutes ago" looked like "7 hours ago".
+- **Root cause:** SQLite returns `DateTime` with `Kind = Unspecified`; Newtonsoft.Json (the MVC serializer here) then writes it without `Z`, and a browser parses such a string as local time. The sync to the platform already wrote `Z` (CR-016), the station's own API did not.
+- **Fix:** `ParkingSetup.AddParking` sets `DateTimeZoneHandling.Utc` on the MVC JSON settings (Newtonsoft.Json, see `Program.cs`): every `DateTime` is written as UTC with `Z`.
+- **Verification:** `integration_parking.py` (`test_lane_name_and_kind` checks that audit times end in `Z`); full suite and `ParkingCore.Tests` re-run.
+- **How to recognise again:** a time on screen exactly the UTC offset away from the clock; an ISO time in an API response without `Z` or offset.
 
 ### BUG-008 — Hard-killed API leaves ffmpeg recording until next start
 - **Area / files:** `ParkingCore/Video.cs` (`VideoRecorderSupervisor.KillLeftover`, `ffmpeg.pid`)
@@ -754,6 +764,8 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-024 | 2026-11-05 | ThanhTranFPT-98 (customer: big screen outside the mine door; mockups `UI/station/03`, `04`, `05`) | Access log screen; public PPE screen at the door (2 PPE cameras, zoom + red on a violation) set up from the station | High | Done |
+| CR-023 | 2026-11-05 | ThanhTranFPT-98 (approved mockups `UI/station/` 01 + 02) | Station UI: camera wall in the V_Partner style, lane & camera setup, recognition devices shown apart from cameras; lane name and kind | High | Done, tested with sample data; not yet tried with a real MediaMTX stream |
 | CR-022 | 2026-11-02 | ThanhTranFPT-98 | FaceID demo: simulated face terminal (until the vendor SDK arrives), pedestrian lane, station UI in navy | High | Done; tested end to end against the FPT Cloud platform |
 | CR-021 | 2026-10-30 | ThanhTranFPT-98 (station plan §9) | Station as a Windows service, restart after a crash, scheduled SQLite backup | Medium | Scripts done and dry-run tested; never installed as a real service |
 | CR-020 | 2026-10-30 | ThanhTranFPT-98 (station plan §6) | Device simulator for a running station: Face-S, AI box, plate cameras and a virtual barrier controller | High | Done, locally tested; no real device tried |
@@ -776,6 +788,36 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-024 — Access log; public PPE screen set up from the station
+- **Date / requested by:** 2026-11-05, ThanhTranFPT-98. The customer wants a large screen outside the mine door showing the 2 PPE cameras; on a violation the camera zooms in and the screen turns red. "I want to set this screen up from the station software." Mockups `UI/station/03-logs.html`, `04-ppe-display.html`, `05-displays.html`; "làm thật" the same day.
+- **Interpretation (what we build):**
+  - *Access log* (Reports tab): time presets (last hour / today / 7 days / custom), lane, outcome, plate or person ID; totals per outcome; table with evidence thumbnail; a drawer per passage with photos (entry vs exit for an exit lane) and the steps the station took. Uses the existing `search` / `stats` / photos endpoints. Statistics, Excel export and audit stay below it.
+  - *Public screens* (`PublicDisplay` rows, Lane settings → Public screens tab, `ManageSite`): name, lane, title / guidance / stop text, 1–4 cameras with a label each, zoom (on/off, ×1.5/1.8/2.2), enlarge the violating camera, red header, amber for warn-only items, hold time, sound. The items checked are the lane's PPE rules — the screen has none of its own, so it can never say "OK" while the lane refuses.
+  - The TV opens `/display/<id>?key=<key>` (no sign-in). `GET /api/v1/parking/display/{id}/state?key=` (anonymous, key checked in constant time; also open to a signed-in `ManageSite` user for the preview) returns the configuration and, per camera, `idle | ok | warning | violation`, the missing items and the person box. It never returns names or person IDs. The TV polls it every second and records last seen / IP. Keys are random, stored with Data Protection, replaced by *Change key*.
+  - Per-camera PPE state comes from a new per-camera slot in `PpeCache` filled by the inbox worker next to the existing per-lane list. The PPE message may carry `box: [x, y, w, h]` (0–1, optional) on a track or a flat message; without it the screen zooms on the centre.
+- **Acceptance criteria:** a PPE message with a missing required item makes that camera's state `violation` on the screen for the hold time; a warn-only item gives `warning`; a wrong key gets 401 and no data; the lane's decision path is untouched.
+- **Design decision and why; alternatives rejected:** polling instead of a SignalR group for the TV: one small request a second per TV, survives Wi-Fi drops without reconnect logic, and needs no anonymous hub. A shared guard account on the TV was rejected (a public PC holding operator credentials).
+- **Risks / edge cases:** the AI box message format is still open (Q-B); `box` is optional so nothing breaks without it. Sound on a TV needs Chrome started with `--autoplay-policy=no-user-gesture-required`.
+- **DB migration needed?** yes: table `PublicDisplays`, SQLite and SQL Server.
+- **Status:** Done.
+- **Result / verification (2026-11-05):** `ParkingCore.Tests` 228 passed, `ParkingSimulation.Tests` 14 passed, `integration_parking.py` 15 OK (public screen: key, per-camera PPE state with box, warn-only amber, rekey, permissions; access log: filters, stats, Excel). Screens checked by screenshot against a demo station with simulated PPE messages; no real AI box or TV used.
+
+### CR-023 — Station UI: camera wall, lane & camera setup
+- **Date / requested by:** 2026-11-05, ThanhTranFPT-98. Mockups approved the same day in the outer repo (`UI/station/01-cameras.html`, `02-lanes.html`, decisions in `UI/station/README.md`). Customer case behind it: 4 car lanes today, 2 motorbike lanes later, "only connect the cameras and set up".
+- **Interpretation (what we build):**
+  - *Video wall* tab → camera wall like the V_Partner monitoring wall: 1/4/9/16 layout (16 by default), at most 16 live streams, filters by lane kind / lane / status, search, paging. Fixed lane order; open alerts are listed in a rail on the left instead of reordering tiles. Tile: alert count, REC, lane's last result, focus button. Focus view: one camera large, the lane's last passages, acknowledge, open. A declared lane without a camera shows a placeholder tile.
+  - Open from the wall goes through the existing paths only: the lane's latest `ManualReview` event is approved (`events/{id}/review`, note filled in automatically, no reason asked — decision 05/11), or its latest `Allow` event is opened (`events/{id}/open`). No new barrier path.
+  - *Lane settings* tab → lane list grouped by area / location with a readiness label, and per lane: readiness checklist, lane info, cameras, recognition devices, recognition & barrier, timing overrides, PPE (person lanes). Add-lane wizard that copies the settings of a lane of the same kind. Camera and device forms in drawers; both save through `PUT cameras`.
+  - *Recognition device* = a `Camera` row with an AI device ID and no stream (a Face-S terminal sends results only). Shown in its own tab, never on the wall. No new table.
+  - `Lane.Name` (display name) and `Lane.Kind` (`Car` | `Motorbike` | `Person`, null = derived from `Subject`) so the wall can group car and motorbike lanes.
+- **Acceptance criteria:** a new lane created in the wizard appears on the wall as "no camera yet" without any code change; adding its camera makes it a live tile; a Face-S row appears under recognition devices and not on the wall; guard, viewer, technician and admin pages still render (`ui_smoke.mjs`); every new text has a Vietnamese entry (`i18n_check.py`).
+- **Design decision and why; alternatives rejected:** keep the MediaMTX iframes (the video path already works) and draw the overlays around/above them, rather than switching to a WHEP `<video>` player now. A separate `RecognitionDevice` table was rejected for now: the receiver already maps results by `ExternalDevice`, so a stream-less camera row is enough.
+- **Risks / edge cases:** a camera's online state is inferred from its last recorded segment / last message (no live probe). The wall's "open" needs an event on the lane; opening an empty lane still has no path (deliberately).
+- **DB migration needed?** yes: two nullable columns on `Lanes` (`LaneNameKind`, `LaneNameKindSqlServer`), generated with `dotnet ef`; both add exactly `Name` and `Kind`.
+- **Status:** Done.
+- **Result / verification (2026-11-05):** `ParkingCore.Tests` 228 passed, `ParkingSimulation.Tests` 14 passed, `integration_parking.py` 14 OK (new `test_lane_name_and_kind`: saved and returned by the snapshot, unknown kind 400, kind/subject mismatch 409, a client that sends neither field still works). `ui_smoke.mjs` passes for the 4 roles; `i18n_check.py` 0 missing (VideoWall.jsx and LaneSetup.jsx added to its file list). `vite build` OK. Both components server-rendered with API-shaped sample data (with and without gateway / permissions / lanes) and looked at in a browser through a throw-away harness page.
+- **Not done / not verified:** no real MediaMTX stream or camera was used, so the live tiles were only seen as empty players; the wizard, drawers and focus view were not clicked through against a running station. Face-S IP / serial / enrolled count are not in the model and are not shown. Also fixed on the way: the *Device health* and *Device input* tabs shared the key `devices`.
 
 ### CR-022 — FaceID demo: simulated face terminal, pedestrian lane, station navy
 - **Date / requested by:** 2026-11-02, ThanhTranFPT-98. "Simulate the station's connection to the platform with a face recognition demo, using the current face recognition system; the FaceID device SDK replaces it later." Decisions 02/11: pedestrian lane, face only; faces enrolled **on the simulator** like a real terminal; known people open automatically (a simulated open signal, no barrier); runs on a laptop in WSL2 with its webcam. 03/11: station UI background dark blue.

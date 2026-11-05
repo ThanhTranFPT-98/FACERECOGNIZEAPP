@@ -6,7 +6,8 @@ namespace DSAVehicle.ParkingCore;
 // ---- PPE (Plan V2 §3.9) ----
 // One reading from a PPE camera for a lane's ROI: how many people, and which items were seen (true) or missing (false).
 // TrackId (CR-018, station plan §4.4) names the one person the AI box follows in the ROI; null for cameras that don't track.
-public sealed record PpeReading(DateTime AtUtc, int PeopleInRoi, IReadOnlyDictionary<string, bool> Items, string? TrackId = null);
+// Box (CR-024, optional) is that person's box as [x, y, width, height] in 0–1 of the frame, used by the public screen to zoom in.
+public sealed record PpeReading(DateTime AtUtc, int PeopleInRoi, IReadOnlyDictionary<string, bool> Items, string? TrackId = null, double[]? Box = null);
 public sealed record PpeVerdict(string Outcome, string Reason, string Summary, string? TrackId = null);   // Outcome: Ok | Warn | Deny | Review
 
 public static class PpeRules
@@ -61,17 +62,25 @@ public static class PpeRules
 }
 
 // O1: latest PPE readings per lane kept in memory, so a face decision never waits for the PPE camera.
+// CR-024: the same readings are also kept per camera, for the public screen (a lane may have two PPE cameras).
 public sealed class PpeCache
 {
     private readonly ConcurrentDictionary<string, List<PpeReading>> lanes = new();
-    public void Record(string laneId, PpeReading reading)
+    private readonly ConcurrentDictionary<string, List<PpeReading>> cameras = new();
+    public void Record(string laneId, PpeReading reading, string? cameraId = null)
     {
-        var list = lanes.GetOrAdd(laneId, _ => []);
+        Add(lanes.GetOrAdd(laneId, _ => []), reading);
+        if (cameraId is not null) Add(cameras.GetOrAdd(cameraId, _ => []), reading);
+    }
+    public IReadOnlyList<PpeReading> Recent(string laneId) => Read(lanes, laneId);
+    public IReadOnlyList<PpeReading> RecentForCamera(string cameraId) => Read(cameras, cameraId);
+    private static void Add(List<PpeReading> list, PpeReading reading)
+    {
         lock (list) { list.Add(reading); list.RemoveAll(r => reading.AtUtc - r.AtUtc > TimeSpan.FromMinutes(1)); if (list.Count > 50) list.RemoveRange(0, list.Count - 50); }
     }
-    public IReadOnlyList<PpeReading> Recent(string laneId)
+    private static IReadOnlyList<PpeReading> Read(ConcurrentDictionary<string, List<PpeReading>> map, string key)
     {
-        if (!lanes.TryGetValue(laneId, out var list)) return [];
+        if (!map.TryGetValue(key, out var list)) return [];
         lock (list) return list.OrderBy(r => r.AtUtc).ToList();
     }
 }
@@ -99,12 +108,12 @@ public static class PpeMessage
                     var single = tracks.Count == 1 ? tracks[0] : (JsonElement?)null;
                     var trackId = single is { } one ? T1550Adapter.Str(one, "trackId") : "";
                     yield return (device, channel, T1550Adapter.Str(roi, "roiId"),
-                        new PpeReading(at, tracks.Count, single is { } s ? Items(s) : new Dictionary<string, bool>(), trackId.Length > 0 ? trackId : null));
+                        new PpeReading(at, tracks.Count, single is { } s ? Items(s) : new Dictionary<string, bool>(), trackId.Length > 0 ? trackId : null, single is { } b ? Box(b) : null));
                 }
                 continue;
             }
             yield return (device, channel, null,
-                new PpeReading(at, x.TryGetProperty("peopleInRoi", out var n) && n.TryGetInt32(out var people) ? people : -1, Items(x)));
+                new PpeReading(at, x.TryGetProperty("peopleInRoi", out var n) && n.TryGetInt32(out var people) ? people : -1, Items(x), null, Box(x)));
         }
     }
 
@@ -112,6 +121,14 @@ public static class PpeMessage
     // (one camera ↔ one lane). A roiId nobody configured finds nothing: the reading is ignored rather than guessed onto another lane.
     public static Camera? CameraFor(IEnumerable<Camera> candidates, string? roi) =>
         roi is { Length: > 0 } ? candidates.FirstOrDefault(x => x.ExternalRoi == roi) : candidates.FirstOrDefault(x => string.IsNullOrEmpty(x.ExternalRoi));
+
+    // "box": [x, y, w, h] in 0–1 of the frame (also accepted as "bbox"); anything else is ignored, never guessed.
+    private static double[]? Box(JsonElement owner)
+    {
+        if (!(owner.TryGetProperty("box", out var b) || owner.TryGetProperty("bbox", out b)) || b.ValueKind != JsonValueKind.Array || b.GetArrayLength() != 4) return null;
+        var values = b.EnumerateArray().Select(v => v.ValueKind == JsonValueKind.Number ? v.GetDouble() : double.NaN).ToArray();
+        return values.All(v => v is >= 0 and <= 1) ? values : null;
+    }
 
     private static Dictionary<string, bool> Items(JsonElement owner)
     {

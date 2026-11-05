@@ -47,7 +47,7 @@ public sealed class CameraInboxWorker(IServiceScopeFactory scopes, InboxSignal s
                         var candidates = await db.Cameras.Where(x => x.ExternalDevice == device && (x.ExternalChannel == null || x.ExternalChannel == "" || x.ExternalChannel == channel)).OrderBy(x => x.Id).ToListAsync(stop);
                         var ppeCamera = PpeMessage.CameraFor(candidates, roi);
                         if (ppeCamera?.LaneId is null) continue;
-                        ppeCamera.LastMessageUtc = now; cache.Record(ppeCamera.LaneId, reading); readings++;
+                        ppeCamera.LastMessageUtc = now; cache.Record(ppeCamera.LaneId, reading, ppeCamera.Id); readings++;
                     }
                     item.Observations = readings; item.Status = readings > 0 ? "Processed" : "Ignored";
                     item.Error = readings > 0 ? null : "PPE message from an unmapped device or ROI";

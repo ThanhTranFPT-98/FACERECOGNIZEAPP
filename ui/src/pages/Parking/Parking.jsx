@@ -5,6 +5,10 @@ import api from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { t, tk, getLang } from '../../i18n'
 import DeviceInputs from './DeviceInputs'
+import VideoWall from './VideoWall'
+import LaneSetup from './LaneSetup'
+import AccessLog from './AccessLog'
+import DisplaySettings from './DisplaySettings'
 const base = '/v1/parking'
 const opts = values => values.map(value => ({ value, label: t(value) }))
 const field = (name, label, input = <Input />, required = true) => <Form.Item key={name} name={name} label={t(label)} rules={required ? [{ required: true, message: t('Required') }] : []}>{input}</Form.Item>
@@ -20,7 +24,7 @@ export default function Parking() {
   const [data, setData] = useState({ vehicles: [], visits: [], lanes: [], events: [], commands: [], alerts: [] })
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [review, setReview] = useState(null), [note, setNote] = useState('')
-  const [health, setHealth] = useState(null), [audit, setAudit] = useState([]), [users, setUsers] = useState([]), [history, setHistory] = useState(null)
+  const [health, setHealth] = useState(null), [audit, setAudit] = useState([]), [users, setUsers] = useState([])
   const [cameras, setCameras] = useState(null), [videoFor, setVideoFor] = useState(null)
   const [areas, setAreas] = useState([]), [areaFilter, setAreaFilter] = useState(null)
   // Declared up here because tab contents built in the render body use them (avoid use-before-declaration).
@@ -28,7 +32,8 @@ export default function Parking() {
   const [stats, setStats] = useState(null), [groupBy, setGroupBy] = useState('day')
   const [presence, setPresence] = useState(null), [shifts, setShifts] = useState([])
   const [resolving, setResolving] = useState(null), [resolveNote, setResolveNote] = useState(''), [falseAlarm, setFalseAlarm] = useState(false)
-  const [wall, setWall] = useState(null), [wallSize, setWallSize] = useState(4)
+  const [wall, setWall] = useState(null)
+  const [activeTab, setActiveTab] = useState('monitor'), [setupLane, setSetupLane] = useState(null)
   const seenAlerts = React.useRef(null)
   useEffect(() => {
     const serious = data.alerts.filter(a => a.severity === 'High' || a.severity === 'Critical').map(a => a.id)
@@ -41,7 +46,6 @@ export default function Parking() {
   const [timingForm] = Form.useForm()
   const [timings, setTimings] = useState(null)
   const [locationForm] = Form.useForm()
-  const [laneForm] = Form.useForm()
   const [cameraForm] = Form.useForm()
   const [newUserForm] = Form.useForm()
   const [editUserForm] = Form.useForm()
@@ -145,23 +149,9 @@ export default function Parking() {
       {timings && <Form layout="vertical" initialValues={{ patterns: timings.platePatterns }} onFinish={async v => { const r = await request('settings/plates', v, 'put'); if (r) setTimings(r) }}>
         <Form.Item name="patterns"><Input.TextArea rows={3} maxLength={2000} placeholder={t('empty = Vietnamese civilian plates')} /></Form.Item>
         <Button type="primary" htmlType="submit" loading={busy}>{t('Save plate formats')}</Button></Form>}</Card>
-    <Alert message={t('Keep live lanes in shadow mode until local testing and commissioning are complete.')} type="warning" />
-    {table(data.lanes, [...cols(['id']), { title: t('Area / location'), render: (_, l) => place(l.id) }, ...cols(['direction', 'policy', 'shadowMode', 'simulation']), { title: t('Edit'), render: (_, l) => <Button onClick={() => laneForm.setFieldsValue(l)}>{t('Load settings')}</Button> }])}
-    <Form form={laneForm} layout="vertical" initialValues={{ direction: 'Entry', policy: 'PlateOnly', plateThreshold: .95, faceThreshold: .8, shadowMode: true, simulation: true, subject: 'Vehicle', ppeMissingMode: 'Review' }} onFinish={v => request('lanes', v, 'put')}>
-      {field('id', 'Lane ID')}{field('locationId', 'Area / location (empty = default location)', <Select allowClear options={locationOptions} />, false)}{field('direction', 'Direction', <Select options={opts(['Entry', 'Exit'])} />)}
-      {field('policy', 'Policy', <Select options={opts(['PlateOnly', 'FaceOnly', 'Either', 'Both', 'ManualReview'])} />)}
-      {field('plateThreshold', 'Plate threshold', <InputNumber min={.01} max={1} step={.01} />)}{field('faceThreshold', 'Face threshold', <InputNumber min={.01} max={1} step={.01} />)}
-      <Form.Item name="shadowMode" label={t('Shadow mode (no opening)')} valuePropName="checked"><Switch /></Form.Item>
-      <Form.Item name="simulation" label={t('Simulated hardware')} valuePropName="checked"><Switch /></Form.Item>
-      <Form.Item name="autoOpen" label={t('Automatically open after an accepted camera observation')} valuePropName="checked"><Switch /></Form.Item>
-      <Space wrap>{field('subject', 'Lane controls', <Select style={{ minWidth: 160 }} options={[{ value: 'Vehicle', label: t('Vehicles (barrier)') }, { value: 'Person', label: t('People (flap gate, face)') }]} />)}
-        {field('ppeRules', 'PPE rules (entry only), e.g. helmet=required,boots=warn — empty = no PPE check', <Input style={{ minWidth: 320 }} maxLength={300} />, false)}
-        {field('ppeMissingMode', 'When there is no PPE reading', <Select style={{ minWidth: 200 }} options={[{ value: 'Review', label: t('Guard checks') }, { value: 'AllowAlert', label: t('Allow + alert') }]} />)}</Space>
-      <Space wrap><Form.Item name="exitRequiresEntry" label={t('Exit needs a matching entry (else guard)')} valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="requireInspectionPhoto" label={t('Inspection photo required before opening')} valuePropName="checked"><Switch /></Form.Item></Space>
-      <Typography.Title level={5}>{t('Timing overrides (leave empty to use the site default)')}</Typography.Title>
-      <Space wrap>{timingFields.map(([key, label, min, max]) => field(key, label, <InputNumber min={min} max={max} placeholder={timings ? 'default ' + timings[key] : ''} />, false))}</Space>
-      <div><Button htmlType="submit" type="primary" loading={busy}>{t('Save lane')}</Button></div></Form></>
+    <Alert message={t('Keep live lanes in shadow mode until local testing and commissioning are complete.')} type="warning" style={{ marginBottom: 16 }} />
+    <LaneSetup data={data} areas={areas} cameras={cameras} timings={timings} request={request} loadCameras={loadCameras} can={can} locationOptions={locationOptions}
+      focusLane={setupLane} onFocused={() => setSetupLane(null)} /></>
   const cameraTab = <>{cameras && <Alert style={{ marginBottom: 16 }} type={cameras.videoEnabled ? 'info' : 'warning'} message={
       (cameras.videoEnabled ? '24/7 recording is on.' : '24/7 recording is off (Video:Enabled).') + ' ' + (cameras.cloudEnabled ? 'Cloud upload is on. Records waiting: ' + cameras.outboxPending : 'Cloud upload is off (Cloud:Enabled).')} />}
     {can('ManageSite') && <Form form={cameraForm} layout="vertical" initialValues={{ enabled: true, record24x7: true }} onFinish={async v => { if (await request('cameras', v, 'put')) { cameraForm.resetFields(); loadCameras() } }}>
@@ -208,23 +198,20 @@ export default function Parking() {
     Object.entries(v).forEach(([k, x]) => { if (x !== undefined && x !== null && x !== '') p[k] = (k === 'from' || k === 'until') ? new Date(x).toISOString() : x })
     return p
   }
-  const runSearch = async (page = 1) => { try { setHistory({ ...(await api.get(base + '/search', { params: { ...filterParams(), page, pageSize: 50 } })).data, page }) } catch { message.error(t('Search failed')) } }
   const runStats = async () => { try { setStats((await api.get(base + '/stats', { params: { ...filterParams(), groupBy } })).data) } catch { message.error(t('Statistics unavailable')) } }
   const exportUrl = () => '/api' + base + '/export?' + new URLSearchParams({ ...filterParams(), lang: getLang() }).toString()
   const maxBar = Math.max(1, ...(stats?.rows || []).map(r => r.events))
-  const historyTab = <><Form form={reportForm} layout="inline" style={{ rowGap: 8 }} onFinish={() => runSearch(1)}>
+  // CR-024: access log first; the filter form below drives the statistics and the Excel export.
+  const historyTab = <><AccessLog data={data} can={can} />
+    {can('ViewReports') && <Card size="small" title={t('Statistics & Excel export')} style={{ marginTop: 20 }}><Form form={reportForm} layout="inline" style={{ rowGap: 8 }} onFinish={runStats}>
       {field('from', 'From', <Input type="datetime-local" />, false)}{field('until', 'Until', <Input type="datetime-local" />, false)}
       {field('areaId', 'Area', <Select allowClear style={{ minWidth: 180 }} options={areaOptions} />, false)}
       {field('laneId', 'Lane', <Select allowClear style={{ minWidth: 140 }} options={data.lanes.map(l => ({ value: l.id, label: l.id }))} />, false)}
       {field('outcome', 'Outcome', <Select allowClear style={{ minWidth: 140 }} options={opts(['Allow', 'Deny', 'ManualReview'])} />, false)}
       {field('reason', 'Reason contains', <Input style={{ width: 160 }} />, false)}{field('plate', 'Plate', <Input style={{ width: 130 }} />, false)}
       {field('personId', 'Person ID', <InputNumber min={1} />, false)}{field('shift', 'Shift', <Select allowClear style={{ minWidth: 120 }} options={[...new Set(shifts.map(s => s.name))].map(n => ({ value: n, label: n }))} />, false)}
-      <Button type="primary" htmlType="submit">{t('Search')}</Button>
-      {can('ViewReports') && <a href={exportUrl()} onClick={e => { e.currentTarget.href = exportUrl() }}><Button>{t('Export Excel (5 sheets)')}</Button></a>}</Form>
-    {history && <><p style={{ marginTop: 12 }}>{history.total} events matched.</p>
-      <Table rowKey="id" dataSource={history.items} columns={eventColumns} scroll={{ x: true }} pagination={{ current: history.page, pageSize: 50, total: history.total, showSizeChanger: false, onChange: runSearch }} /></>}
-    {can('ViewReports') && <Card size="small" title={t('Statistics')} style={{ marginTop: 20 }}>
-      <Space wrap>{t('Group by')} <Select value={groupBy} onChange={setGroupBy} style={{ minWidth: 140 }} options={[['day', 'Day'], ['month', 'Month'], ['year', 'Year'], ['hour', 'Hour of day (parking)'], ['shift', 'Shift (mine)'], ['lane', 'Lane']].map(([value, label]) => ({ value, label: t(label) }))} />
+      <a href={exportUrl()} onClick={e => { e.currentTarget.href = exportUrl() }}><Button>{t('Export Excel (5 sheets)')}</Button></a></Form>
+      <Space wrap style={{ marginTop: 12 }}>{t('Group by')} <Select value={groupBy} onChange={setGroupBy} style={{ minWidth: 140 }} options={[['day', 'Day'], ['month', 'Month'], ['year', 'Year'], ['hour', 'Hour of day (parking)'], ['shift', 'Shift (mine)'], ['lane', 'Lane']].map(([value, label]) => ({ value, label: t(label) }))} />
         <Button onClick={runStats}>{t('Show statistics')}</Button>{stats?.truncated && <Tag color="orange">first 100,000 events only</Tag>}</Space>
       {stats && <Table rowKey="bucket" size="small" pagination={false} style={{ marginTop: 12 }} dataSource={stats.rows} scroll={{ x: true }} columns={[
         { title: stats.groupBy, dataIndex: 'bucket' }, { title: t('Events'), dataIndex: 'events', render: v => <Space><div style={{ width: 120 * v / maxBar, height: 10, background: 'var(--accent)', borderRadius: 2 }} />{v}</Space> },
@@ -297,16 +284,9 @@ export default function Parking() {
       ...(can('ManageSite') ? [{ title: t('Action'), render: (_, s) => <Space><Button onClick={() => shiftForm.setFieldsValue(s)}>{t('Edit')}</Button><Button danger onClick={async () => { await request('shifts/' + s.id, {}, 'delete'); loadPresence() }}>{t('Delete')}</Button></Space> }] : [])])}</>
   const loadWall = async () => { try { setWall((await api.get(base + '/video/wall')).data) } catch { setWall(null) } }
   const laneAlert = laneId => data.alerts.some(a => alertLane(a) === laneId && (a.severity === 'High' || a.severity === 'Critical'))
-  const wallTab = <><Space wrap style={{ marginBottom: 16 }}><Button onClick={loadWall}>{t('Refresh')}</Button>
-      {t('Grid')} <Select value={wallSize} onChange={setWallSize} options={[1, 4, 9, 16].map(n => ({ value: n, label: n + ' ' + t('tiles') }))} />
-      {isAdmin && <a href={'/api' + base + '/video/gateway-config'}>{t('Download gateway config (mediamtx.yml, contains passwords)')}</a>}</Space>
-    {wall && !wall.gatewayUrl && <Alert type="warning" showIcon message={t('No stream gateway configured. Install MediaMTX on the station, load the downloaded mediamtx.yml, and set Video__GatewayUrl (e.g. http://station:8889).')} />}
-    {wall?.groups.map(g => <Card key={g.area} size="small" title={g.area} style={{ marginBottom: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + Math.sqrt(wallSize) + ', minmax(0, 1fr))', gap: 8 }}>
-        {g.cameras.slice(0, wallSize).map(c => <div key={c.id} style={{ border: '3px solid ' + (laneAlert(c.laneId) ? 'var(--danger)' : 'transparent'), borderRadius: 6 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><span>{c.name} · {c.laneId || '—'}</span><Tag color={c.recording ? 'green' : 'default'}>{t(c.recording ? 'recording' : 'not recording')}</Tag></div>
-          {wall.gatewayUrl ? <iframe title={c.id} src={wall.gatewayUrl.replace(/\/$/, '') + '/' + c.id + '/'} style={{ width: '100%', aspectRatio: '16 / 9', border: 0, background: 'var(--video-bg)' }} allow="autoplay; fullscreen" /> :
-            <div style={{ aspectRatio: '16 / 9', background: 'var(--video-bg)' }} />}</div>)}</div></Card>)}</>
+  // CR-023: camera wall; "Attach camera" on a lane without one jumps to that lane in Lane settings.
+  const wallTab = <VideoWall data={data} wall={wall} alertLane={alertLane} can={can} request={request} loadWall={loadWall} isAdmin={isAdmin}
+    onSetupLane={id => { setSetupLane(id); setActiveTab('lanes') }} />
   const saveThen = form => async (path, values, method = 'put') => { if (await request(path, values, method)) form.resetFields() }
   const areasTab = <><Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('Area → Location → Lane. Move lanes between locations in Lane settings. An area or location can only be deleted when it is empty.')} />
     <Space align="start" wrap size="large">
@@ -367,13 +347,14 @@ export default function Parking() {
   return <><Typography.Title level={2}>{t('Vietnam parking access')}</Typography.Title><p>{t('Cars and motorcycles · visitors · access control · no parking fees')}</p>
     {error && <Alert type="error" message={t(error)} />}
     <Space wrap style={{ marginBottom: 20 }}><Button onClick={refresh}>{t('Refresh')}</Button><Tag>{data.vehicles.length} vehicles</Tag><Tag color={data.alerts.some(a => a.severity === 'Critical') ? 'red' : data.alerts.some(a => a.severity === 'High') ? 'volcano' : 'orange'}>{data.alerts.length} open alerts</Tag>{data.lanes.map(l => <Tag key={l.id} color={l.shadowMode ? 'blue' : l.simulation ? 'default' : 'red'}>{l.id}: {l.shadowMode ? 'Shadow' : l.simulation ? 'Simulation' : 'LIVE'}</Tag>)}</Space>
-    <Card><Tabs items={[
+    <Card><Tabs activeKey={activeTab} onChange={setActiveTab} items={[
       { key: 'monitor', label: t('Lane monitor'), children: monitor }, { key: 'presence', label: t('Inside now'), children: presenceTab }, { key: 'vehicles', label: t('Vehicles'), children: vehicles },
       { key: 'visitors', label: t('Visitors'), children: visitors }, { key: 'people', label: t('People'), children: peopleTab }, { key: 'alerts', label: t('Alerts'), children: alerts },
       { key: 'devices', label: t('Device health'), children: operations },
       ...(can('ViewEvidence') ? [{ key: 'cameras', label: t('Cameras & video'), children: cameraTab }, { key: 'wall', label: t('Video wall'), children: wallTab }] : []), { key: 'history', label: t('Reports & audit'), children: historyTab },
-      ...(can('ManageSite') ? [{ key: 'areas', label: t('Areas'), children: areasTab }, { key: 'lanes', label: t('Lane settings'), children: settings }] : []),
-      ...(can('ManageSite') || can('ManagePeople') ? [{ key: 'devices', label: t('Device input'), children: <DeviceInputs can={can} /> }] : []),
+      ...(can('ManageSite') ? [{ key: 'areas', label: t('Areas'), children: areasTab }, { key: 'lanes', label: t('Lane settings'), children: settings },
+        { key: 'displays', label: t('Public screens'), children: <DisplaySettings data={data} cameras={cameras} /> }] : []),
+      ...(can('ManageSite') || can('ManagePeople') ? [{ key: 'deviceInput', label: t('Device input'), children: <DeviceInputs can={can} /> }] : []),
       ...(can('ManageUsers') ? [{ key: 'users', label: t('Operators & roles'), children: accounts }] : []),
     ]} /></Card>
     <Modal title={t(review?.reconcile ? 'Confirm physical inspection' : 'Guard review')} open={!!review} onCancel={() => setReview(null)} footer={<Space>

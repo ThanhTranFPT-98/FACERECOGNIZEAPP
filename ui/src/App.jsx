@@ -11,8 +11,11 @@ import Alerts from './pages/Alerts/Alerts'
 import Settings from './pages/Settings/Settings'
 import Parking from './pages/Parking/Parking'
 import { AuthProvider } from './contexts/AuthContext'
+import PublicDisplay from './pages/Display/PublicDisplay'
 
 function App() {
+  // CR-024: a public screen (TV) opens /display/<id>?key=… with no account, so it is rendered outside sign-in.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/display/')) return <PublicDisplay />
   return (
     <AuthProvider><SignalRProvider>
       <Router>

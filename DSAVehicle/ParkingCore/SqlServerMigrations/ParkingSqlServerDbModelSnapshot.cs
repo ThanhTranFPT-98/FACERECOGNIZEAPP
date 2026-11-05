@@ -477,11 +477,19 @@ namespace DSAVehicle.ParkingCore.SqlServerMigrations
                     b.Property<int?>("HeartbeatFreshSeconds")
                         .HasColumnType("int");
 
+                    b.Property<string>("Kind")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<DateTime?>("LastHeartbeatUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<bool>("Obstructed")
                         .HasColumnType("bit");
@@ -783,6 +791,77 @@ namespace DSAVehicle.ParkingCore.SqlServerMigrations
                     b.HasIndex("StationId", "Id");
 
                     b.ToTable("Presence");
+                });
+
+            modelBuilder.Entity("DSAVehicle.ParkingCore.PublicDisplay", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("AlarmHeader")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("CamerasJson")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("Enlarge")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("HoldSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("KeyProtected")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("LaneId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("LastSeenIp")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("LastSeenUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("ShowWarn")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Sound")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("StopText")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Subtitle")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<double>("Zoom")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PublicDisplays");
                 });
 
             modelBuilder.Entity("DSAVehicle.ParkingCore.RegisteredVehicle", b =>

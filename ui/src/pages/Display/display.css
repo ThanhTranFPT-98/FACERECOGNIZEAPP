@@ -1,0 +1,44 @@
+/* CR-024: public PPE screen, read from 3–6 m. Always dark, whatever the station theme; red only for a violation. */
+.pdScreen, .pdMessage { position: fixed; inset: 0; z-index: 1000; box-sizing: border-box; background: #020a14; color: #e6edf3; font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+.pdScreen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 1.4vh; padding: 2vh 1.6vw; overflow: hidden; }
+.pdMessage { display: grid; place-items: center; align-content: center; gap: 2vh; text-align: center; }
+.pdMessage.inline { position: static; grid-column: 1 / -1; color: #9fb0c4; font-size: 2vw; }
+.pdMessage h1 { margin: 0; font-size: 3vw; } .pdMessage p { color: #9fb0c4; font-size: 1.6vw; }
+
+.pdHead { display: flex; align-items: center; gap: 2vw; padding: 1.6vh 1.6vw; border: 2px solid #1c3554; border-radius: 14px; background: #061426; transition: background 200ms, border-color 200ms; }
+.pdHead h1 { margin: 0; font-size: clamp(22px, 3.4vw, 64px); color: #f0f6fc; }
+.pdHead p { margin: .4vh 0 0; font-size: clamp(14px, 1.5vw, 28px); color: #9fb0c4; }
+.pdSpacer { flex: 1; }
+.pdRules { display: flex; gap: 1vw; }
+.pdRule { display: grid; justify-items: center; gap: .4vh; min-width: 7vw; padding: 1vh .8vw; border: 2px solid #1f6f9e; border-radius: 12px; background: #0c2a3f; color: #38bdf8; }
+.pdRule b { font-size: clamp(13px, 1.25vw, 24px); color: #f0f6fc; } .pdRule small { font-size: clamp(11px, .95vw, 18px); color: #9fb0c4; }
+.pdRule.warnOnly { border-color: #9f6b12; background: #3a2c0c; color: #f5b13d; }
+.pdClock { font: 600 clamp(22px, 3vw, 56px) 'IBM Plex Mono', monospace; color: #f0f6fc; }
+
+.pdCams { display: grid; gap: 1.2vw; min-height: 0; transition: grid-template-columns 420ms ease; }
+.pdCam { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; overflow: hidden; border: 4px solid #1f5f3a; border-radius: 16px; background: #01050c; }
+.pdVideo { position: relative; overflow: hidden; min-height: 0; }
+.pdZoom { position: absolute; inset: 0; transition: transform 520ms cubic-bezier(.2, .8, .2, 1); }
+.pdZoom iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
+.pdNoVideo { display: grid; place-items: center; align-content: center; gap: 1vh; height: 100%; color: #8b949e; font-size: 1.3vw; }
+.pdLabel { position: absolute; left: 1vw; top: 1.4vh; z-index: 2; padding: .5vh .8vw; border-radius: 8px; background: rgba(0, 0, 0, .6); font: 600 clamp(12px, 1.1vw, 22px) 'IBM Plex Mono', monospace; color: #fff; }
+.pdZoomTag { position: absolute; right: 1vw; top: 1.4vh; z-index: 2; padding: .5vh .8vw; border-radius: 8px; background: rgba(248, 81, 73, .9); font: 700 clamp(12px, 1.1vw, 22px) 'IBM Plex Mono', monospace; color: #fff; }
+
+.pdStatus { display: flex; align-items: center; gap: 1.2vw; padding: 1.6vh 1.4vw; background: #0f3d25; color: #b7f7c4; font-size: clamp(28px, 3.4vw, 64px); }
+.pdStatus > svg { flex: 0 0 auto; }
+.pdStatus strong { display: block; font-size: clamp(20px, 2.6vw, 52px); line-height: 1.1; color: #fff; }
+.pdStatus span { display: block; font-size: clamp(13px, 1.4vw, 28px); }
+.pdItems { display: flex; gap: .6vw; margin-left: auto; }
+.pdItem { display: inline-flex !important; align-items: center; gap: .4vw; padding: .6vh .8vw; border-radius: 10px; background: rgba(0, 0, 0, .28); font-size: clamp(12px, 1.2vw, 24px) !important; font-weight: 700; white-space: nowrap; }
+.pdItem.miss { background: #fff; color: #b91c1c; }
+
+@keyframes pdPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0); } 50% { box-shadow: 0 0 40px 6px rgba(248, 81, 73, .55), inset 0 0 60px rgba(248, 81, 73, .25); } }
+.pdCam.violation { border-color: #f85149; animation: pdPulse 1.1s ease-in-out infinite; }
+.pdCam.violation .pdStatus { background: #b91c1c; color: #ffe4e1; }
+.pdCam.warning { border-color: #d29922; } .pdCam.warning .pdStatus { background: #6b4b0c; color: #ffe2a8; }
+.pdCam.idle { border-color: #1c3554; } .pdCam.idle .pdStatus { background: #0c2a3f; color: #c6e6ff; }
+.pdCam.minor .pdStatus span, .pdCam.minor .pdItems { display: none; }
+.pdScreen.alarm .pdHead { background: #7f1d1d; border-color: #f85149; } .pdScreen.alarm .pdHead p { color: #ffd7d5; }
+.pdFoot { display: flex; justify-content: space-between; color: #8b949e; font-size: clamp(11px, 1vw, 18px); }
+.pdOffline { color: #ffb4ae; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .pdCam.violation { animation: none; } .pdZoom, .pdCams { transition: none; } }
