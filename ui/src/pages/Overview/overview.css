@@ -1,0 +1,67 @@
+/* CR-025: station overview boards (mockup v4). Colours come from styles.css, so both themes work. */
+.ov h1 { margin: 0; font-size: 22px; color: var(--fg-strong); }
+.ovHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ovLoading { padding: 40px; text-align: center; color: var(--fg-muted); }
+.ovStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.ovStats > div { padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); }
+.ovStats span { display: block; color: var(--fg-muted); font-size: 12px; }
+.ovStats strong { color: var(--fg-strong); font: 600 24px 'IBM Plex Mono', monospace; }
+.ovStats .bad strong { color: var(--danger); }
+
+/* PPE class bar and chips */
+.ovPpeBar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); }
+.ovPpeBar .legend { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--fg-muted); font-size: 12px; }
+.ovPpeBar .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 6px; }
+.ovPpe { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ovPpe .chip { padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 18px; border: 1px solid transparent; }
+.ovPpe .ok, .ovPpeBar .ok { --c: var(--success); } .ovPpe .miss, .ovPpeBar .miss { --c: var(--danger); } .ovPpe .none, .ovPpeBar .none { --c: var(--fg-muted); }
+.ovPpe .chip, .ovPpeBar .legend i { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); border-color: color-mix(in srgb, var(--c) 45%, transparent); }
+.ovPpe .chip.none { opacity: .55; }
+
+/* Cửa lò: newest cards left, the full in/out table right (scrolls inside its frame, header pinned) */
+.ovMine { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.ovCards, .ovTable, .ovFeed { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); overflow: hidden; }
+.ovCards > header, .ovTable > header, .ovFeed > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--fg-strong); font-weight: 600; }
+.ovCards { display: grid; gap: 8px; padding-bottom: 8px; }
+.ovCard { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0 8px; padding: 8px; border: 1px solid var(--border-sub); border-left: 3px solid var(--success); border-radius: 8px; background: var(--bg-base); }
+.ovCard.red { border-left-color: var(--danger); } .ovCard.orange { border-left-color: var(--warning); }
+.ovCard .avatar { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--bg-raised); color: var(--fg-strong); font-weight: 700; }
+.ovCard .who strong { display: block; color: var(--fg-strong); }
+.ovCard .who small { display: block; margin-bottom: 4px; color: var(--fg-muted); font-size: 12px; }
+.ovTable .wrap { max-height: max(340px, calc(100vh - 360px)); overflow: auto; }
+.ovTable table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ovTable th { position: sticky; top: 0; z-index: 1; padding: 8px 10px; background: var(--bg-raised); color: var(--fg-muted); font-weight: 600; text-align: left; white-space: nowrap; }
+.ovTable td { padding: 7px 10px; border-top: 1px solid var(--border-sub); color: var(--fg); white-space: nowrap; }
+.ovTable tbody tr:hover td { background: var(--bg-hover); }
+
+/* Xe ra vào: lane tiles fill the width (as many columns as fit), the feed of all lanes on the right */
+.ovBar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ovBar .spacer, .ovLane footer .spacer { flex: 1; }
+.ovWall { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+.ovLanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 10px; }
+.ovLane { display: flex; flex-direction: column; border: 1px solid var(--border); border-top: 3px solid var(--fg-muted); border-radius: 10px; background: var(--bg-surface); transition: box-shadow .2s; }
+.ovLane.green { border-top-color: var(--success); } .ovLane.red { border-top-color: var(--danger); } .ovLane.orange { border-top-color: var(--warning); }
+.ovLane.focus { box-shadow: 0 0 0 2px var(--accent); }
+.ovLane header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-sub); }
+.ovLane header strong { flex: 1; overflow: hidden; color: var(--fg-strong); text-overflow: ellipsis; white-space: nowrap; }
+.ovLane .kind { font-size: 16px; color: var(--accent); }
+.ovLane .switches { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 6px 10px; font-size: 12px; color: var(--fg-muted); }
+.ovLane .switches label { display: inline-flex; align-items: center; gap: 5px; }
+.ovLane .policy { margin-left: auto; font-family: 'IBM Plex Mono', monospace; }
+.ovLane .body { flex: 1; display: grid; align-content: start; gap: 4px; padding: 8px 10px; cursor: pointer; }
+.ovLane .body.empty { place-items: center; min-height: 112px; color: var(--fg-muted); cursor: default; }
+.ovLane .plate { justify-self: start; padding: 2px 10px; border: 2px solid var(--fg-strong); border-radius: 6px; background: #f5f5f0; color: #111; font: 700 20px 'IBM Plex Mono', monospace; letter-spacing: 1px; }
+.ovLane .who { color: var(--fg); } .ovLane .who small { margin-left: 6px; color: var(--fg-muted); }
+.ovLane .match { font-size: 12px; } .ovLane .match.ok { color: var(--success); } .ovLane .match.bad { color: var(--danger); }
+.ovLane .result { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-muted); }
+.ovLane footer { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-sub); }
+.ovFeed { position: sticky; top: 0; }
+.ovFeed ul { max-height: max(360px, calc(100vh - 260px)); margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.ovFeed li { display: grid; grid-template-columns: 62px 1fr auto; grid-template-areas: 'time lane tag' 'time plate tag' 'time who tag'; column-gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border-sub); cursor: pointer; font-size: 12px; }
+.ovFeed li:hover, .ovFeed li.focus { background: var(--bg-hover); }
+.ovFeed time { grid-area: time; color: var(--fg-muted); font-family: 'IBM Plex Mono', monospace; }
+.ovFeed .lane { grid-area: lane; color: var(--fg-muted); } .ovFeed .plate { grid-area: plate; color: var(--fg-strong); font-family: 'IBM Plex Mono', monospace; }
+.ovFeed .who { grid-area: who; color: var(--fg); } .ovFeed .ant-tag { grid-area: tag; align-self: center; margin: 0; }
+.ovDetail { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0; } .ovDetail dt { color: var(--fg-muted); } .ovDetail dd { margin: 0; }
+
+@media (max-width: 1100px) { .ovMine, .ovWall { grid-template-columns: 1fr; } .ovFeed { position: static; } }

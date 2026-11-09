@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd'
 import * as signalR from '@microsoft/signalr'
 import api from '../../services/api'
@@ -9,6 +10,7 @@ import VideoWall from './VideoWall'
 import LaneSetup from './LaneSetup'
 import AccessLog from './AccessLog'
 import DisplaySettings from './DisplaySettings'
+import { SECTIONS } from './sections'
 const base = '/v1/parking'
 const opts = values => values.map(value => ({ value, label: t(value) }))
 const field = (name, label, input = <Input />, required = true) => <Form.Item key={name} name={name} label={t(label)} rules={required ? [{ required: true, message: t('Required') }] : []}>{input}</Form.Item>
@@ -16,7 +18,8 @@ const field = (name, label, input = <Input />, required = true) => <Form.Item ke
 const coded = new Set(['outcome', 'reason', 'status', 'severity', 'kind', 'category', 'direction', 'policy', 'subject', 'role', 'source', 'ppeOutcome'])
 const cols = names => names.map(name => ({ title: tk(name), dataIndex: name, render: v => typeof v === 'boolean' ? (v ? t('Yes') : t('No')) : coded.has(name) && v ? t(String(v)) : String(v ?? '—') }))
 const table = (rows, columns) => <Table rowKey="id" dataSource={rows} columns={columns} scroll={{ x: true }} pagination={{ pageSize: 10 }} style={{ marginTop: 20 }} />
-export default function Parking() {
+// CR-026: one screen per menu entry (sections.js); `section` is the key of the entry that is open.
+export default function Parking({ section }) {
   const { user } = useAuth()
   // Screens follow the user's permissions (CR-004); the server checks every call again.
   const can = permission => (user.permissions || []).includes(permission)
@@ -33,7 +36,9 @@ export default function Parking() {
   const [presence, setPresence] = useState(null), [shifts, setShifts] = useState([])
   const [resolving, setResolving] = useState(null), [resolveNote, setResolveNote] = useState(''), [falseAlarm, setFalseAlarm] = useState(false)
   const [wall, setWall] = useState(null)
-  const [activeTab, setActiveTab] = useState('monitor'), [setupLane, setSetupLane] = useState(null)
+  const navigate = useNavigate(), location = useLocation()
+  // "Attach camera" on the camera wall opens that lane in Lane settings (passed in the navigation state).
+  const [setupLane, setSetupLane] = useState(location.state?.lane || null)
   const seenAlerts = React.useRef(null)
   useEffect(() => {
     const serious = data.alerts.filter(a => a.severity === 'High' || a.severity === 'Critical').map(a => a.id)
@@ -114,7 +119,7 @@ export default function Parking() {
     {can('ViewEvidence') && cameras?.videoEnabled && <Button onClick={() => openVideo(e)}>{t('Video')}</Button>}
     {can('ViewEvidence') && <Button onClick={() => openPhotos(e)}>{t(laneById[e.laneId]?.direction === 'Exit' ? 'Photos / entry' : 'Photos')}</Button>}
   </Space> }]
-  const monitor = <><Alert type="info" showIcon message={t('Shadow lanes record decisions without opening barriers. Camera results require a validated recognition model or guard review.')} style={{ marginBottom: 20 }} />
+  const simulateTab = <><Alert type="info" showIcon message={t('Shadow lanes record decisions without opening barriers. Camera results require a validated recognition model or guard review.')} style={{ marginBottom: 20 }} />
     {can('OperateLane') && <Tabs items={[
       { key: 'simulation', label: t('Simulated observation'), children: <Form layout="vertical" initialValues={{ plateConfidence: .99, faceConfidence: 0 }} onFinish={v => request('simulate', { ...v, correlationId: crypto.randomUUID() })}>
         {field('laneId', 'Lane', <Select options={lanes.filter(l => data.lanes.find(x => x.id === l.value)?.simulation)} />)}
@@ -130,8 +135,9 @@ export default function Parking() {
         <Form.Item name="image" label={t('Plate JPEG / PNG (5 MB maximum)')} valuePropName="file" rules={[{ required: true }]}><Input type="file" accept="image/jpeg,image/png" /></Form.Item>
         <Form.Item name="face" label={t('Optional face image')} valuePropName="file"><Input type="file" accept="image/jpeg,image/png" /></Form.Item>
         <Button htmlType="submit" type="primary" loading={busy}>{t('Recognize and evaluate')}</Button></Form> },
-    ]} />}
-    <Space style={{ marginTop: 20 }}>{t('Area')} <Select allowClear placeholder={t('All areas')} style={{ minWidth: 240 }} options={areaOptions} value={areaFilter} onChange={setAreaFilter} /></Space>
+    ]} />}</>
+  const monitor = <>
+    <Space style={{ marginBottom: 4 }}>{t('Area')} <Select allowClear placeholder={t('All areas')} style={{ minWidth: 240 }} options={areaOptions} value={areaFilter} onChange={setAreaFilter} /></Space>
     {table(data.events.filter(e => inArea(e.laneId)), eventColumns)}<Typography.Title level={4}>{t('Barrier commands')}</Typography.Title>
     {table(data.commands.filter(c => inArea(c.laneId)), [...cols(['id', 'laneId', 'status', 'passageUtc']), { title: t('Passage'), render: (_, c) => can('OperateLane') && c.status === 'Simulated' && !c.passageUtc && <Button onClick={() => request('commands/' + c.id + '/simulate-passage')}>{t('Simulate passage')}</Button> }, ...(can('Reconcile') ? [{ title: t('Action'), render: (_, c) => (c.status === 'Unknown' || (c.status === 'Acknowledged' && !c.passageUtc)) && <Button onClick={() => { setReview({ ...c, reconcile: true }); setNote('') }}>{t('Reconcile after inspection')}</Button> }] : [])])}
     <Typography.Title level={4}>{t('Parking sessions')}</Typography.Title>
@@ -286,7 +292,7 @@ export default function Parking() {
   const laneAlert = laneId => data.alerts.some(a => alertLane(a) === laneId && (a.severity === 'High' || a.severity === 'Critical'))
   // CR-023: camera wall; "Attach camera" on a lane without one jumps to that lane in Lane settings.
   const wallTab = <VideoWall data={data} wall={wall} alertLane={alertLane} can={can} request={request} loadWall={loadWall} isAdmin={isAdmin}
-    onSetupLane={id => { setSetupLane(id); setActiveTab('lanes') }} />
+    onSetupLane={id => { setSetupLane(id); navigate('/settings/lanes', { state: { lane: id } }) }} />
   const saveThen = form => async (path, values, method = 'put') => { if (await request(path, values, method)) form.resetFields() }
   const areasTab = <><Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('Area → Location → Lane. Move lanes between locations in Lane settings. An area or location can only be deleted when it is empty.')} />
     <Space align="start" wrap size="large">
@@ -344,19 +350,15 @@ export default function Parking() {
         {field('id', 'Role code (letters, digits, - or _)', <Input maxLength={40} />)}{field('name', 'Name', <Input maxLength={100} />)}
         <Form.Item name="permissions" label={t('Permissions (ViewLive is always included)')}><Select mode="multiple" options={opts(roles.permissions)} /></Form.Item>
         <Space><Button type="primary" htmlType="submit">{t('Save role')}</Button><Button onClick={() => roleForm.resetFields()}>{t('Clear')}</Button></Space></Form></Card>}</>}</>
-  return <><Typography.Title level={2}>{t('Vietnam parking access')}</Typography.Title><p>{t('Cars and motorcycles · visitors · access control · no parking fees')}</p>
-    {error && <Alert type="error" message={t(error)} />}
-    <Space wrap style={{ marginBottom: 20 }}><Button onClick={refresh}>{t('Refresh')}</Button><Tag>{data.vehicles.length} vehicles</Tag><Tag color={data.alerts.some(a => a.severity === 'Critical') ? 'red' : data.alerts.some(a => a.severity === 'High') ? 'volcano' : 'orange'}>{data.alerts.length} open alerts</Tag>{data.lanes.map(l => <Tag key={l.id} color={l.shadowMode ? 'blue' : l.simulation ? 'default' : 'red'}>{l.id}: {l.shadowMode ? 'Shadow' : l.simulation ? 'Simulation' : 'LIVE'}</Tag>)}</Space>
-    <Card><Tabs activeKey={activeTab} onChange={setActiveTab} items={[
-      { key: 'monitor', label: t('Lane monitor'), children: monitor }, { key: 'presence', label: t('Inside now'), children: presenceTab }, { key: 'vehicles', label: t('Vehicles'), children: vehicles },
-      { key: 'visitors', label: t('Visitors'), children: visitors }, { key: 'people', label: t('People'), children: peopleTab }, { key: 'alerts', label: t('Alerts'), children: alerts },
-      { key: 'devices', label: t('Device health'), children: operations },
-      ...(can('ViewEvidence') ? [{ key: 'cameras', label: t('Cameras & video'), children: cameraTab }, { key: 'wall', label: t('Video wall'), children: wallTab }] : []), { key: 'history', label: t('Reports & audit'), children: historyTab },
-      ...(can('ManageSite') ? [{ key: 'areas', label: t('Areas'), children: areasTab }, { key: 'lanes', label: t('Lane settings'), children: settings },
-        { key: 'displays', label: t('Public screens'), children: <DisplaySettings data={data} cameras={cameras} /> }] : []),
-      ...(can('ManageSite') || can('ManagePeople') ? [{ key: 'deviceInput', label: t('Device input'), children: <DeviceInputs can={can} /> }] : []),
-      ...(can('ManageUsers') ? [{ key: 'users', label: t('Operators & roles'), children: accounts }] : []),
-    ]} /></Card>
+  const screens = { passes: monitor, presence: presenceTab, vehicles, visitors, people: peopleTab, alerts, devices: operations, cameras: cameraTab, wall: wallTab,
+    history: historyTab, areas: areasTab, lanes: settings, displays: <DisplaySettings data={data} cameras={cameras} />, deviceInput: <DeviceInputs can={can} />,
+    users: accounts, simulate: simulateTab }
+  const current = SECTIONS.find(x => x.key === section)
+  return <><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+      <Typography.Title level={3} style={{ margin: 0 }}>{t(current?.label || 'Parking Access')}</Typography.Title>
+      <Button onClick={refresh}>{t('Refresh')}</Button></div>
+    {error && <Alert type="error" message={t(error)} style={{ marginBottom: 16 }} />}
+    {current && current.show(can) ? screens[section] : <Alert type="warning" showIcon message={t('You do not have access to this screen.')} />}
     <Modal title={t(review?.reconcile ? 'Confirm physical inspection' : 'Guard review')} open={!!review} onCancel={() => setReview(null)} footer={<Space>
       <Button onClick={() => setReview(null)}>{t('Cancel')}</Button>
       {!review?.reconcile && <Button danger disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request('events/' + review.id + '/review', { approve: false, note })) setReview(null) }}>{t('Deny')}</Button>}

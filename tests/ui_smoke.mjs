@@ -1,4 +1,4 @@
-// UI smoke test: server-renders the Parking page for several users and fails on any runtime error in the render body
+// UI smoke test: server-renders every station screen (pages/Parking/sections.js) for several users and fails on any runtime error in the render body
 // (e.g. a variable used before it is declared), which `vite build` cannot detect. No browser or API needed.
 // Run from the repo root: node tests/ui_smoke.mjs
 import path from 'node:path'
@@ -28,23 +28,39 @@ try {
   const React = fromUi('react')
   const { renderToString } = fromUi('react-dom/server')
   const { default: Parking } = await server.ssrLoadModule('/src/pages/Parking/Parking.jsx')
+  const { SECTIONS } = await server.ssrLoadModule('/src/pages/Parking/sections.js')
+  const { t } = await server.ssrLoadModule('/src/i18n.js')
+  const { MemoryRouter } = fromUi('react-router-dom')
   const originalError = console.error
+  // CR-026: every screen of the menu the user may open, one at a time (the overview has its own page and loads after mount).
   for (const user of users) {
     globalThis.__TEST_USER__ = user
-    const errors = []
-    console.error = (...args) => { const text = args.map(String).join(' '); if (!/useLayoutEffect|findDOMNode|Warning: \[antd/.test(text)) errors.push(text) }
-    try {
-      const html = renderToString(React.createElement(Parking))
-      console.error = originalError
-      // No localStorage in this test, so the default language (Vietnamese, GC-39) must be used.
-      if (!html.includes('Giám sát làn')) throw new Error('page did not render its tabs in Vietnamese')
-      if (html.includes('>Lane monitor<')) throw new Error('English tab label left in the Vietnamese page')
-      if (errors.length) throw new Error(errors[0].slice(0, 300))
-      console.log(`PASS: Parking page renders for ${user.role} (${html.length} chars)`)
-    } catch (err) {
-      console.error = originalError
-      failures++; console.log(`FAIL: ${user.role}: ${err.message}`)
+    const can = p => user.permissions.includes(p)
+    const screens = SECTIONS.filter(s => s.key !== 'overview' && s.show(can))
+    for (const section of screens) {
+      const errors = []
+      console.error = (...args) => { const text = args.map(String).join(' '); if (!/useLayoutEffect|findDOMNode|Warning: \[antd/.test(text)) errors.push(text) }
+      try {
+        const html = renderToString(React.createElement(MemoryRouter, { initialEntries: [section.path] }, React.createElement(Parking, { section: section.key })))
+        console.error = originalError
+        // No localStorage in this test, so the default language (Vietnamese, GC-39) must be used.
+        if (!html.includes(t(section.label).replaceAll('&', '&amp;')) || t(section.label) === section.label) throw new Error('screen title not in Vietnamese: ' + section.label)
+        if (html.includes('Tài khoản của bạn không có quyền')) throw new Error('allowed screen refused')
+        if (errors.length) throw new Error(errors[0].slice(0, 300))
+      } catch (err) {
+        console.error = originalError
+        failures++; console.log(`FAIL: ${user.role} ${section.path}: ${err.message}`)
+      }
     }
+    // A screen outside the user's permissions says so instead of rendering it.
+    const hidden = SECTIONS.find(s => s.key !== 'overview' && !s.show(can))
+    if (hidden) {
+      console.error = () => {}
+      const html = renderToString(React.createElement(MemoryRouter, null, React.createElement(Parking, { section: hidden.key })))
+      console.error = originalError
+      if (!html.includes('Tài khoản của bạn không có quyền')) { failures++; console.log(`FAIL: ${user.role} can see ${hidden.path}`) }
+    }
+    console.log(`PASS: ${user.role}: ${screens.length} screens render in Vietnamese` + (hidden ? `, ${hidden.path} refused` : ''))
   }
 } finally { await server.close() }
 console.log(failures ? `${failures} UI smoke failures` : 'UI smoke passed')

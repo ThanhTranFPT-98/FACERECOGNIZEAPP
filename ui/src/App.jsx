@@ -1,18 +1,15 @@
 import React from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { SignalRProvider } from './contexts/SignalRContext'
 import MainLayout from './components/Layout/MainLayout'
-import Dashboard from './pages/Dashboard/Dashboard'
-import Monitor from './pages/Monitor/Monitor'
-import Employees from './pages/Employees/Employees'
-import Strangers from './pages/Strangers/Strangers'
-import AccessLogs from './pages/AccessLogs/AccessLogs'
-import Alerts from './pages/Alerts/Alerts'
-import Settings from './pages/Settings/Settings'
+import Overview from './pages/Overview/Overview'
 import Parking from './pages/Parking/Parking'
+import { SECTIONS } from './pages/Parking/sections'
 import { AuthProvider } from './contexts/AuthContext'
 import PublicDisplay from './pages/Display/PublicDisplay'
 
+// CR-026: one route per screen. The legacy face pages (Monitor, Employees, Strangers, AccessLogs, Alerts, Settings: SQL Server)
+// are no longer routed: faces are enrolled on the FaceID devices (decision 09/11/2026) and the parking screens cover the rest.
 function App() {
   // CR-024: a public screen (TV) opens /display/<id>?key=… with no account, so it is rendered outside sign-in.
   if (typeof window !== 'undefined' && window.location.pathname.startsWith('/display/')) return <PublicDisplay />
@@ -21,15 +18,10 @@ function App() {
       <Router>
         <MainLayout>
           <Routes>
-            <Route path="/" element={<Parking />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/monitor" element={<Monitor />} />
-            <Route path="/employees" element={<Employees />} />
-            <Route path="/strangers" element={<Strangers />} />
-            <Route path="/access-logs" element={<AccessLogs />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/parking" element={<Parking />} />
+            <Route path="/dashboard" element={<Overview />} />
+            {SECTIONS.filter(s => s.key !== 'overview').map(s => <Route key={s.key} path={s.path} element={<Parking section={s.key} />} />)}
+            {/* Old addresses (bookmarks, the docs) land on the overview. */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </MainLayout>
       </Router>

@@ -45,6 +45,7 @@ public class SyncCursor
 
 public sealed record InsideEntry(string AreaCode, string SubjectKey, string SubjectName, DateTime SinceUtc, string LaneId, string StationId, string? Shift, bool DoubleEntry);
 public sealed record UnmatchedExit(string AreaCode, string SubjectKey, string SubjectName, DateTime PassageUtc, string LaneId, string StationId);
+public sealed record VisitRow(string AreaCode, string SubjectKey, string SubjectName, DateTime InUtc, string InLaneId, Guid InEventId, DateTime? OutUtc, string? OutLaneId);
 
 public static class PresenceBook
 {
@@ -64,6 +65,21 @@ public static class PresenceBook
                 unmatched.Add(new(r.AreaCode, r.SubjectKey, r.SubjectName, r.PassageUtc, r.LaneId, r.StationId));
         }
         return (inside.Values.OrderBy(x => x.SinceUtc).ToList(), unmatched);
+    }
+
+    // CR-025: each entry with the exit that closed it, newest entry first; no exit yet = still inside ("Chưa ra").
+    // Same replay as Compute: an exit closes the latest open entry; exits without an entry are Compute's unmatched list.
+    public static List<VisitRow> Visits(IEnumerable<PresenceRecord> records)
+    {
+        var open = new Dictionary<(string, string), int>();
+        var rows = new List<VisitRow>();
+        foreach (var r in records.OrderBy(x => x.PassageUtc).ThenBy(x => x.Direction == "In" ? 0 : 1))
+        {
+            var key = (r.AreaCode, r.SubjectKey);
+            if (r.Direction == "In") { open[key] = rows.Count; rows.Add(new(r.AreaCode, r.SubjectKey, r.SubjectName, r.PassageUtc, r.LaneId, r.EventId, null, null)); }
+            else if (open.Remove(key, out var index)) rows[index] = rows[index] with { OutUtc = r.PassageUtc, OutLaneId = r.LaneId };
+        }
+        return rows.OrderByDescending(x => x.InUtc).ToList();
     }
 
     public static string? ShiftAt(IEnumerable<Shift> shifts, DateTime localTime)
@@ -167,6 +183,21 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
                 overstay = areas.FirstOrDefault(a => a.Code == x.AreaCode)?.OverstayMinutes is int limit && (now - x.SinceUtc).TotalMinutes > limit }),
             unmatched = unmatched.OrderByDescending(x => x.PassageUtc).Take(100)
         };
+    }
+
+    // CR-025: entries and exits of the last hours for the overview boards, with the PPE verdict of each entry.
+    [HttpGet("presence/visits")]
+    public async Task<object> Visits(int hours = 24)
+    {
+        var visible = await scope.Areas();
+        var codes = await db.Areas.AsNoTracking().Where(a => visible == null || visible.Contains(a.Id)).Select(a => a.Code).ToListAsync();
+        var since = DateTime.UtcNow.AddHours(-Math.Clamp(hours, 1, 168));
+        var rows = PresenceBook.Visits(await db.Presence.AsNoTracking().Where(x => x.PassageUtc >= since && codes.Contains(x.AreaCode)).ToListAsync()).Take(1000).ToList();
+        var ids = rows.Select(x => x.InEventId).ToList();
+        var entries = await db.Events.AsNoTracking().Where(e => ids.Contains(e.Id)).Select(e => new { e.Id, e.PersonId, e.Plate, e.PpeOutcome, e.PpeSummary }).ToDictionaryAsync(e => e.Id);
+        return rows.Select(x => { var e = entries.GetValueOrDefault(x.InEventId);
+            return new { x.AreaCode, x.SubjectKey, x.SubjectName, x.InUtc, x.InLaneId, x.InEventId, x.OutUtc, x.OutLaneId,
+                personId = e?.PersonId, plate = e?.Plate, ppeOutcome = e?.PpeOutcome, ppeSummary = e?.PpeSummary }; });
     }
 
     // A guard closes a presence that will never get its exit (e.g. exit through an unmonitored gate). Audited, never silent.

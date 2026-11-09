@@ -67,6 +67,11 @@ public class SimulatedObservation
     public int? PersonId { get; set; }
     [Range(0, 1)] public double FaceConfidence { get; set; }
 }
+public class SwitchInput
+{
+    public bool Plate { get; set; }
+    public bool Face { get; set; }
+}
 public class ReviewInput
 {
     public bool Approve { get; set; }
@@ -189,6 +194,14 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
         if (input.LocationId.HasValue && !await db.Locations.AnyAsync(x => x.Id == input.LocationId)) throw new InvalidOperationException("Location not found.");
         lane.LocationId = input.LocationId ?? lane.LocationId ?? (await AreaCatalog.EnsureDefault(db)).Id;
         db.Log(Actor, "ConfigureLane", input.Id); return lane;
+    });
+    // CR-025: guards switch plate / FaceID recognition from the lane wall (decided 09/11/2026). Only the policy changes, and it is audited.
+    [HttpPut("lanes/{id}/recognition"), Authorize(Policy = Perm.OperateLane)]
+    public async Task<IActionResult> Recognition(string id, SwitchInput input) => await Mutate(async () => {
+        await scope.Ensure(id);
+        var lane = await db.Lanes.FindAsync(id) ?? throw new InvalidOperationException("Lane not found.");
+        lane.Policy = AccessPolicy.FromSwitches(lane.Subject, input.Plate, input.Face);
+        db.Log(Actor, "SwitchRecognition", id + ":" + lane.Policy); return lane;
     });
     [HttpPost("simulate"), Authorize(Policy = Perm.OperateLane)]
     public async Task<IActionResult> Simulate(SimulatedObservation input) => await Execute(async () => { await scope.Ensure(input.LaneId); return await service.Observe(input.LaneId, input.CorrelationId,

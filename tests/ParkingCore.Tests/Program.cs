@@ -32,6 +32,9 @@ vehicle.Blocked = false;
 Check(AccessPolicy.Evaluate(lane, evidence with { PlateConfidence = double.NaN }, vehicle, false, true).Outcome == "ManualReview", "NaN cannot authorize");
 Check(AccessPolicy.Evaluate(lane, evidence with { FaceConfidence = 1.1 }, vehicle, false, true).Outcome == "ManualReview", "Out-of-range score cannot authorize");
 Check(AccessPolicy.Evaluate(lane, evidence, vehicle, false, false).Outcome == "ManualReview", "Unregistered face cannot authorize Both");
+Check(AccessPolicy.FromSwitches("Vehicle", true, true) == "Both" && AccessPolicy.FromSwitches("Vehicle", true, false) == "PlateOnly"
+    && AccessPolicy.FromSwitches("Vehicle", false, true) == "FaceOnly" && AccessPolicy.FromSwitches("Vehicle", false, false) == "ManualReview", "CR-025 lane switches map to the policy");
+Check(AccessPolicy.FromSwitches("Person", true, false) == "ManualReview" && AccessPolicy.FromSwitches("Person", false, true) == "FaceOnly", "CR-025 a person lane switches on the face only");
 
 // Verify stored templates are ciphertext while legacy vectors remain readable.
 using var connection = new SqliteConnection("Data Source=:memory:");
@@ -474,6 +477,10 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     Check(unmatched.Single().SubjectKey == "W3", "An exit without an entry is reported, not hidden");
     Check(inside.Single(x => x.SubjectKey == "W4").DoubleEntry, "Two entries without an exit are flagged");
     Check(PresenceBook.Compute([P("W5", "In", 1), P("W5", "Out", 2, "Manual")]).Inside.Count == 0, "A guard's manual close ends the presence");
+    var visits = PresenceBook.Visits([P("W1", "Out", 30), P("W1", "In", 10), P("W2", "In", 12), P("W3", "Out", 5), P("W1", "In", 40)]);
+    Check(visits.Select(x => x.SubjectKey).SequenceEqual(new[] { "W1", "W2", "W1" }) && visits[0].OutUtc is null && visits[2].OutUtc == t0.AddMinutes(30),
+        "CR-025 visits: newest entry first, each exit closes its entry, still inside has no exit");
+    Check(visits.All(x => x.SubjectKey != "W3"), "CR-025 visits: an exit without an entry is not a visit");
     var shifts = new[] { new Shift { Name = "Ca 1", Start = "06:00", End = "14:00" }, new Shift { Name = "Ca 3", Start = "22:00", End = "06:00" } };
     Check(PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 7, 30, 0)) == "Ca 1" && PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 2, 0, 0)) == "Ca 3"
         && PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 15, 0, 0)) is null, "Shift lookup handles day and overnight shifts");

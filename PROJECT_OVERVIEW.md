@@ -606,6 +606,9 @@ python -m pip install -r AiService/requirements-plate.txt   # + install Tesserac
 
 Logs: `DSAVehicle/App_Data/parking-api*.log`, `parking-ocr*.log`. Demo flow: `docs/DEPLOYMENT.md` → "Demo flow".
 
+Overview boards without cameras (CR-025): start the API with `Receiver__Key` (32+ characters), then
+`STATION_PASSWORD=… python scripts/demo_station.py --key <Receiver__Key>` and open `Tổng quan`. Demo or test station only: it changes lanes `entry-1` / `exit-1`.
+
 ### Tests
 
 ```powershell
@@ -764,6 +767,8 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-026 | 2026-11-09 | ThanhTranFPT-98 ("tab Kiểm soát ra vào có vẻ thừa") | Station navigation: one menu entry per screen, grouped like the FPT Cloud platform; legacy face pages no longer routed | High | Done, tested (UI smoke for 4 roles, browser as admin and guard) |
+| CR-025 | 2026-11-09 | ThanhTranFPT-98 (hand-drawn boards, mockup v4 in the outer repo `Planning/BaoCao_GiaoDien_anh/draw/mockup/`) | Station overview = Cửa lò board (FaceID + PPE) and vehicle lane wall; guard switches plate / FaceID per lane; device demo without cameras | High | Done, tested with the device demo; emergency open deferred |
 | CR-024 | 2026-11-05 | ThanhTranFPT-98 (customer: big screen outside the mine door; mockups `UI/station/03`, `04`, `05`) | Access log screen; public PPE screen at the door (2 PPE cameras, zoom + red on a violation) set up from the station | High | Done |
 | CR-023 | 2026-11-05 | ThanhTranFPT-98 (approved mockups `UI/station/` 01 + 02) | Station UI: camera wall in the V_Partner style, lane & camera setup, recognition devices shown apart from cameras; lane name and kind | High | Done, tested with sample data; not yet tried with a real MediaMTX stream |
 | CR-022 | 2026-11-02 | ThanhTranFPT-98 | FaceID demo: simulated face terminal (until the vendor SDK arrives), pedestrian lane, station UI in navy | High | Done; tested end to end against the FPT Cloud platform |
@@ -788,6 +793,32 @@ Use this section for the customer's new requirements. Write an entry **before** 
 | CR-003 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Configurable timings: site defaults + lane overrides (GC-44) | High | Done, locally tested |
 | CR-002 | 2026-09-25 | ThanhTranFPT-98 (Plan V2, Phase 1) | Areas and locations (GC-01) | High | Done, locally tested |
 | CR-001 | 2026-09-24 | Than Uông Bí (via ThanhTranFPT-98) | Store data in the cloud now; central platform deferred | High | Built (Phases 1–7), locally tested; Phase 0 customer blockers and Phase 8 pilot open |
+
+### CR-026 — Station navigation grouped like the FPT Cloud platform
+- **Date / requested by:** 2026-11-09, ThanhTranFPT-98: "the Kiểm soát ra vào tab seems redundant". Two menus were stacked: the left menu (mostly the legacy face pages, Admin only, SQL Server) and 15 tabs inside one "Kiểm soát ra vào" page.
+- **Interpretation (what we build):**
+  - `ui/src/pages/Parking/sections.js` lists the screens; the menu (`MainLayout`) and the page (`Parking`, prop `section`) both read it. Groups: *Vận hành* (Tổng quan, Đang ở trong, Lượt & lệnh barrier, Cảnh báo, Màn hình camera, Tình trạng thiết bị), *Danh mục* (Người, Phương tiện, Khách), *Báo cáo* (Báo cáo & nhật ký), *Cài đặt* (Khu vực, Cấu hình làn, Camera & video, Nguồn thiết bị, Màn hình công cộng, Tài khoản & vai trò, Mô phỏng lượt qua). Each screen has its own address (`/inside`, `/settings/lanes`, …); any other address, `/parking` included, goes to `/dashboard`.
+  - The menu shows what the user's permissions allow (before: non-admins had a single entry); a screen opened by address without the permission says so. Camera & video is set-up only (ManageSite): guards watch the video wall and open an event's video from Passes.
+  - The old "Lane monitor" tab is split: passes, barrier commands (simulate passage, reconcile an unknown outcome) and sessions stay in *Vận hành*; the simulated-observation and camera-image forms move to *Cài đặt → Mô phỏng lượt qua* (ManageSite + OperateLane).
+  - Legacy face pages (Monitor, Employees, Strangers, AccessLogs, Alerts, Settings) are no longer routed: faces are enrolled on the FaceID devices only (decision 09/11/2026). The files and the legacy APIs are kept until that is confirmed on site. The header no longer shows the legacy face channel or its alert count; the bell opens Cảnh báo.
+- **Design decision and why:** one list for menu and page instead of a router config plus a tab list, so a new screen is one line. The big `Parking` component is kept (its screens share the snapshot, forms and modals); splitting it per file is left for later.
+- **DB migration needed?** no.
+- **Status:** Done.
+- **Result / verification (2026-11-09):** `node tests/ui_smoke.mjs` now renders every screen each role may open (Admin 16, Guard 9, Viewer 8, Technician 12) and checks a refused one; `i18n_check` 0 missing; `vite build` OK. Browser: admin and a guard account against the demo station; `/parking` lands on the overview.
+
+### CR-025 — Station overview boards; lane switches for guards; device demo
+- **Date / requested by:** 2026-11-09, ThanhTranFPT-98. The "Tổng quan" page was still the legacy face dashboard (English, needs the face SQL Server, spins forever without it). Wanted: the two hand-drawn boards; "if there is no camera or lane yet, build a mock test to demo".
+- **Interpretation (what we build):**
+  - `Tổng quan` (`/dashboard`, `ui/src/pages/Overview/`) replaces `pages/Dashboard/Dashboard.jsx`, with two views. **Cửa lò**: person lanes; PPE class bar (⊕ adds a class the AI box reported, chosen per browser); the 5 newest passes as cards; a table of every entry in the last 24 h with time out or "Chưa ra", newest first, scrolling inside its frame. **Xe ra vào**: one tile per vehicle lane, as many columns as fit, filter car / motorbike; latest pass (a pass waiting for the guard stays on the tile); motorbike rider ✓/✗ against the registration; Approve / Reject (note required), Open barrier for an unexpired Allow; feed of all lanes; Add lane (ManageSite, starts in shadow mode).
+  - Plate / FaceID switches on each tile set the lane policy: both = `Both`, plate = `PlateOnly`, face = `FaceOnly`, none = `ManualReview` (`AccessPolicy.FromSwitches`); a person lane switches the face only. `PUT lanes/{id}/recognition` needs `OperateLane` (guards may — decision 09/11), area-scoped, audited as `SwitchRecognition`. A lane on `Either` shows both switches on and becomes `Both` when switched.
+  - `GET presence/visits?hours=24` (ViewLive, area-scoped): entries paired with their exits (`PresenceBook.Visits`, same replay as `Compute`) plus the entry's PPE verdict.
+  - `scripts/demo_station.py`: sets up 4 car lanes (reuses `entry-1` / `exit-1`), 2 motorbike lanes (`Both`), Cửa lò in / out with PPE rules, devices, 24 workers, 10 cars, 8 motorbikes; then plays the devices through the receiver (plate cameras, motorbike terminal with the rider, face terminal, PPE AI box) and reports the passage of every opened (virtual) barrier. Some passes are left for the guard on purpose. It waits out the lane cooldown and the merge window.
+- **Design decision and why; alternatives rejected:** the demo goes through the real receiver, not fake data in the browser (user's choice 09/11): the boards are then already right for real cameras, and the chain evidence → decision → command → passage is untouched. A board-only "demo mode" was rejected for that reason.
+- **Not done:** emergency open without a recognition (button shown disabled; needs its own safety design — reason, audit, limits). Reviews, passages and lane switches are still not broadcast on `/parkingHub`; the board polls every 5 s.
+- **Risks / edge cases:** PPE items are parsed from `ppeSummary` text ("helmet ✓, vest ✗"); a double entry leaves the first visit open ("Chưa ra"). The demo changes lanes `entry-1` / `exit-1`: run it on a demo or test station only.
+- **DB migration needed?** no.
+- **Status:** Done.
+- **Result / verification (2026-11-09):** `ParkingCore.Tests` 232 passed (4 new: switch mapping, visits pairing); `i18n_check` 0 missing. Boards checked in the browser against a station fed by `demo_station.py`: switches change the policy (PlateOnly → Both → PlateOnly), Approve on a pending pass returns 200 and the tile turns Allow. No real camera used.
 
 ### CR-024 — Access log; public PPE screen set up from the station
 - **Date / requested by:** 2026-11-05, ThanhTranFPT-98. The customer wants a large screen outside the mine door showing the 2 PPE cameras; on a violation the camera zooms in and the screen turns red. "I want to set this screen up from the station software." Mockups `UI/station/03-logs.html`, `04-ppe-display.html`, `05-displays.html`; "làm thật" the same day.

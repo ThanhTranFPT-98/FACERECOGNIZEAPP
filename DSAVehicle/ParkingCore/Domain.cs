@@ -299,4 +299,9 @@ public static class AccessPolicy
         return allow ? new("Allow", visitor && vehicle is null ? "ACTIVE_VISITOR" : "POLICY_MATCH")
             : new("ManualReview", lane.Policy == "ManualReview" ? "GUARD_APPROVAL_REQUIRED" : "INSUFFICIENT_IDENTITY_EVIDENCE");
     }
+
+    // CR-025: the lane wall's Plate / FaceID switches are the policy. Both on = both must match (and the face must be the vehicle's);
+    // both off = every pass waits for the guard. A person lane has no plate: its switch is the face only.
+    public static string FromSwitches(string subject, bool plate, bool face) => subject == "Person" ? (face ? "FaceOnly" : "ManualReview")
+        : (plate, face) switch { (true, true) => "Both", (true, false) => "PlateOnly", (false, true) => "FaceOnly", _ => "ManualReview" };
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Layout, Menu, Badge, Avatar, Typography, Space, theme, Button } from 'antd'
+import { Layout, Menu, Avatar, Typography, Space, theme, Button } from 'antd'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   DashboardOutlined,
@@ -9,63 +9,42 @@ import {
   FileTextOutlined,
   BellOutlined,
   SettingOutlined,
+  SwapOutlined,
+  ApiOutlined,
+  IdcardOutlined,
+  CarOutlined,
+  EnvironmentOutlined,
+  NodeIndexOutlined,
+  CameraOutlined,
+  DesktopOutlined,
+  SafetyOutlined,
+  ExperimentOutlined,
   SunOutlined,
   MoonOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useSignalR } from '../../contexts/SignalRContext'
 import BrandMark from '../Brand/BrandMark'
+import { GROUPS, SECTIONS } from '../../pages/Parking/sections'
 import { useThemeMode } from '../../contexts/ThemeContext'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
 import { t, getLang, setLang } from '../../i18n'
 
-const menuItems = [
-  { key: '/parking', icon: <VideoCameraOutlined />, label: t('Parking Access') },
-  {
-    key: '/dashboard',
-    icon: <DashboardOutlined />,
-    label: t('Dashboard'),
-  },
-  {
-    key: '/monitor',
-    icon: <VideoCameraOutlined />,
-    label: t('Monitor'),
-  },
-  {
-    key: '/employees',
-    icon: <TeamOutlined />,
-    label: t('Employees'),
-  },
-  {
-    key: '/strangers',
-    icon: <UserAddOutlined />,
-    label: t('Strangers'),
-  },
-  {
-    key: '/access-logs',
-    icon: <FileTextOutlined />,
-    label: t('Access Logs'),
-  },
-  {
-    key: '/alerts',
-    icon: <BellOutlined />,
-    label: t('Alerts'),
-  },
-  {
-    key: '/settings',
-    icon: <SettingOutlined />,
-    label: t('Settings'),
-  },
-]
+// CR-026: the menu is the list of station screens (pages/Parking/sections.js), grouped, filtered by the user's permissions.
+const ICONS = { overview: DashboardOutlined, presence: TeamOutlined, passes: SwapOutlined, alerts: BellOutlined, wall: VideoCameraOutlined,
+  devices: ApiOutlined, people: IdcardOutlined, vehicles: CarOutlined, visitors: UserAddOutlined, history: FileTextOutlined,
+  areas: EnvironmentOutlined, lanes: NodeIndexOutlined, cameras: CameraOutlined, deviceInput: ApiOutlined, displays: DesktopOutlined,
+  users: SafetyOutlined, simulate: ExperimentOutlined }
+const menuFor = can => GROUPS.map(group => ({ type: 'group', key: group, label: t(group),
+  children: SECTIONS.filter(s => s.group === group && s.show(can)).map(s => ({ key: s.path, icon: React.createElement(ICONS[s.key] || SettingOutlined), label: t(s.label) })) }))
+  .filter(g => g.children.length)
 
 const MainLayout = ({ children }) => {
   const { user, logout } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const { isConnected, alerts } = useSignalR()
   const { mode, toggle } = useThemeMode()
   const {
     token: { colorBgContainer, borderRadiusLG },
@@ -94,14 +73,7 @@ const MainLayout = ({ children }) => {
           theme={mode}
           mode="inline"
           selectedKeys={[currentMenuKey]}
-          items={menuItems.filter(item => user.role === 'Admin' || item.key === '/parking').map(item => ({
-            ...item,
-            label: item.key === '/alerts' ? (
-              <Badge count={alerts.length} size="small" offset={[10, 0]}>
-                <span>{item.label}</span>
-              </Badge>
-            ) : item.label,
-          }))}
+          items={menuFor(permission => (user.permissions || []).includes(permission))}
           onClick={handleMenuClick}
           style={{ borderRight: 0, paddingTop: 8 }}
         />
@@ -123,17 +95,15 @@ const MainLayout = ({ children }) => {
                 width: 12,
                 height: 12,
                 borderRadius: '50%',
-                backgroundColor: isConnected ? 'var(--success)' : 'var(--danger)',
+                backgroundColor: 'var(--success)',
               }}
             />
             <Text type="secondary">
-              {t(user.role !== 'Admin' ? 'Signed in' : isConnected ? 'Face channel connected' : 'Face channel disconnected')}
+              {t('Signed in')}
             </Text>
           </Space>
           <Space>
-            <Badge count={alerts.length}>
-              <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} />
-            </Badge>
+            <BellOutlined style={{ fontSize: 20, cursor: 'pointer' }} onClick={() => navigate('/alerts')} title={t('Alerts')} />
             <Avatar style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)' }}>{user.username?.[0]?.toUpperCase() || 'A'}</Avatar>
             <Text strong>{user.username} · {t(user.role)}</Text>
             <Button size="small" icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />} onClick={toggle} title={t(mode === 'dark' ? 'Light theme' : 'Dark theme')} aria-label={t(mode === 'dark' ? 'Light theme' : 'Dark theme')} />
