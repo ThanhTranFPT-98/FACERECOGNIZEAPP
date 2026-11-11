@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Alert, Button, Drawer, Input, Segmented, Select, Space, Table, Tag, Timeline, Typography, message } from 'antd'
-import { CameraOutlined, PictureOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CameraOutlined, PictureOutlined, ReloadOutlined, UploadOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import api from '../../services/api'
 import { t } from '../../i18n'
 import { KINDS, laneKind, laneName, sortLanes } from './laneUtil'
@@ -8,6 +8,7 @@ import './station.css'
 
 // CR-024: access log. Same filters as the search endpoint (GC-33), with time presets, per-outcome totals,
 // an evidence thumbnail per passage, and a drawer with the photos and the steps the station took.
+// CR-028: the drawer also takes the inspection photo (a lane may require one before opening) and plays the passage's video.
 const base = '/v1/parking'
 const OUTCOME_COLOR = { Allow: 'green', Deny: 'red', ManualReview: 'orange' }
 const KIND_LABEL = { Car: 'Car lanes', Motorbike: 'Motorbike lanes', Person: 'Person lanes' }
@@ -86,11 +87,12 @@ export default function AccessLog({ data, can }) {
 
 // One passage: what was decided, the photos, and each step the station took.
 function PassageDrawer({ event: e, lane, commands, can, onClose }) {
-  const [photos, setPhotos] = useState(null), [entry, setEntry] = useState(null)
+  const [photos, setPhotos] = useState(null), [entry, setEntry] = useState(null), [video, setVideo] = useState(null), [busy, setBusy] = useState(false)
+  const loadPhotos = () => api.get(base + '/events/' + e.id + '/photos').then(r => setPhotos(r.data)).catch(() => setPhotos([]))
   useEffect(() => {
-    setPhotos(null); setEntry(null)
+    setPhotos(null); setEntry(null); setVideo(null)
     if (!e || !can('ViewEvidence')) return
-    api.get(base + '/events/' + e.id + '/photos').then(r => setPhotos(r.data)).catch(() => setPhotos([]))
+    loadPhotos()
     if (lane?.direction === 'Exit') api.get(base + '/events/' + e.id + '/entry').then(r => setEntry(r.data)).catch(() => {})
   }, [e?.id])
   if (!e) return <Drawer open={false} />
@@ -104,6 +106,16 @@ function PassageDrawer({ event: e, lane, commands, can, onClose }) {
     command?.passageUtc && { color: 'green', children: <><b>{t('Passed')}</b><br />{time(command.passageUtc)}</> },
   ].filter(Boolean)
   const img = (src, label) => <figure key={src}><img alt={label} src={src} /><figcaption>{label}</figcaption></figure>
+  // Inspection photo: uploaded (phone / file) or grabbed from the lane camera. Stored as evidence of this passage.
+  const savePhoto = async send => {
+    setBusy(true)
+    try { await send(); message.success(t('Photo saved')); loadPhotos() }
+    catch (err) { message.error(t(err.response?.data?.message || 'Upload failed')) }
+    finally { setBusy(false) }
+  }
+  const upload = file => { const body = new FormData(); body.append('file', file); body.append('note', 'inspection'); return savePhoto(() => api.post(base + '/events/' + e.id + '/photos', body, { headers: { 'Content-Type': 'multipart/form-data' } })) }
+  const grab = () => savePhoto(() => api.post(base + '/events/' + e.id + '/photos/camera'))
+  const loadVideo = async () => { try { setVideo((await api.get(base + '/events/' + e.id + '/video')).data) } catch { message.error(t('Video list unavailable')) } }
   return <Drawer open width={720} onClose={onClose} title={<>{e.plate || e.personId || t('Unknown')} · {laneName(lane || { id: e.laneId })}</>} extra={<Tag color={OUTCOME_COLOR[e.outcome]}>{t(e.outcome)}</Tag>}>
     <Space direction="vertical" style={{ width: '100%' }} size="large">
       <div className="alKpis" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', margin: 0 }}>
@@ -115,11 +127,21 @@ function PassageDrawer({ event: e, lane, commands, can, onClose }) {
         <div className="alPhotos">
           {entry?.found && entry.entry?.evidenceId && img('/api' + base + '/events/' + entry.entry.id + '/evidence', t('Entry') + ' · ' + entry.entry.laneId + ' · ' + time(entry.entry.createdUtc))}
           {e.evidenceId && img('/api' + base + '/events/' + e.id + '/evidence', t(lane?.direction === 'Exit' ? 'Exit' : 'Evidence') + ' · ' + time(e.createdUtc))}
-          {(photos || []).map(p => img('/api' + base + '/photos/' + p.id, t(p.kind) + ' · ' + p.takenBy + ' · ' + time(p.createdUtc)))}
+          {(photos || []).map(p => img('/api' + base + '/photos/' + p.id, t(p.kind) + ' · ' + p.takenBy + ' · ' + time(p.createdUtc) + (p.note ? ' · ' + p.note : '')))}
         </div>
+        {can('OperateLane') && <Space wrap style={{ marginTop: 8 }}>
+          {lane?.requireInspectionPhoto && !(photos || []).some(p => p.kind === 'Inspection') && <Tag color="orange">{t('This lane needs an inspection photo before opening')}</Tag>}
+          <label className="ant-btn ant-btn-default" style={{ cursor: busy ? 'wait' : 'pointer' }}><UploadOutlined /> {t('Upload inspection photo')}
+            <input type="file" hidden accept="image/jpeg,image/png" capture="environment" disabled={busy} onChange={ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) upload(f) }} /></label>
+          <Button icon={<CameraOutlined />} loading={busy} onClick={grab}>{t('Take from lane camera')}</Button></Space>}
         {entry && !entry.found && <Alert type="warning" showIcon message={t('No entry found for this plate. Check the vehicle before opening.')} />}
         {!e.evidenceId && !(photos || []).length && <Typography.Text type="secondary">{t('No photo for this passage.')}</Typography.Text>}</div>
         : <Alert type="info" showIcon message={t('Photos are shown to accounts that may view evidence.')} />}
+      {can('ViewEvidence') && <div><Typography.Title level={5}><VideoCameraOutlined /> {t('Video')}</Typography.Title>
+        {!video ? <Button onClick={loadVideo}>{t('Show the video of this passage')}</Button>
+          : !video.length ? <Alert type="warning" showIcon message={t('No recording covers this event. Check that a camera is linked to the lane and was recording.')} />
+          : video.map(v => <div key={v.id} style={{ marginBottom: 12 }}><Typography.Text strong>{v.cameraId}</Typography.Text> · {time(v.startUtc)} → {time(v.endUtc)} · <Tag>{v.status}</Tag>
+            <video controls preload="metadata" style={{ width: '100%', marginTop: 6 }} src={'/api' + base + '/video/segments/' + v.id + '/play#t=' + Math.floor(v.offsetSeconds)} /></div>)}</div>}
       <div><Typography.Title level={5}><CameraOutlined /> {t('What happened')}</Typography.Title><Timeline items={steps} /></div>
     </Space>
   </Drawer>

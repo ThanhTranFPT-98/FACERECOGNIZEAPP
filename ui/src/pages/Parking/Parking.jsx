@@ -28,12 +28,12 @@ export default function Parking({ section }) {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [review, setReview] = useState(null), [note, setNote] = useState('')
   const [health, setHealth] = useState(null), [audit, setAudit] = useState([]), [users, setUsers] = useState([])
-  const [cameras, setCameras] = useState(null), [videoFor, setVideoFor] = useState(null)
-  const [areas, setAreas] = useState([]), [areaFilter, setAreaFilter] = useState(null)
+  const [cameras, setCameras] = useState(null)
+  const [areas, setAreas] = useState([])
   // Declared up here because tab contents built in the render body use them (avoid use-before-declaration).
   const [reportForm] = Form.useForm()
   const [stats, setStats] = useState(null), [groupBy, setGroupBy] = useState('day')
-  const [presence, setPresence] = useState(null), [shifts, setShifts] = useState([])
+  const [shifts, setShifts] = useState([])
   const [resolving, setResolving] = useState(null), [resolveNote, setResolveNote] = useState(''), [falseAlarm, setFalseAlarm] = useState(false)
   const [wall, setWall] = useState(null)
   const navigate = useNavigate(), location = useLocation()
@@ -58,13 +58,12 @@ export default function Parking({ section }) {
   const [roles, setRoles] = useState(null)
   const [vehicleForm] = Form.useForm()
   const loadCameras = async () => { try { setCameras((await api.get(base + '/cameras')).data) } catch { setCameras(null) } }
-  const openVideo = async e => { try { setVideoFor({ event: e, segments: (await api.get(base + '/events/' + e.id + '/video')).data }) } catch { message.error(t('Video list unavailable')) } }
   const refresh = async () => {
     try { setData((await api.get(base + '/snapshot')).data); setAreas((await api.get(base + '/areas')).data); setTimings((await api.get(base + '/settings/timings')).data); setError('') }
     catch { setError('Could not load parking records. Check the API connection.') }
   }
   useEffect(() => {
-    refresh(); if (can('ViewEvidence')) { loadCameras(); loadWall() } if (can('ManageUsers')) loadUsers(); loadPeople(); loadPresence()
+    refresh(); if (can('ViewEvidence')) { loadCameras(); loadWall() } if (can('ManageUsers')) loadUsers(); loadPeople(); loadShifts()
     const connection = new signalR.HubConnectionBuilder().withUrl('/parkingHub').withAutomaticReconnect().build()
     connection.on('ParkingChanged', refresh); connection.start().catch(() => {})
     const timer = setInterval(refresh, 10000)
@@ -78,7 +77,6 @@ export default function Parking({ section }) {
   }
   // Area → Location → Lane (GC-01): look up where each lane sits so screens can be filtered by area.
   const laneArea = Object.fromEntries(areas.flatMap(a => a.locations.flatMap(l => l.lanes.map(id => [id, { area: a, location: l }]))))
-  const inArea = laneId => !areaFilter || laneArea[laneId]?.area.id === areaFilter
   const areaOptions = areas.map(a => ({ value: a.id, label: a.name + ' (' + a.code + ')' }))
   const locationOptions = areas.flatMap(a => a.locations.map(l => ({ value: l.id, label: a.name + ' / ' + l.name })))
   const place = laneId => laneArea[laneId] ? laneArea[laneId].area.name + ' / ' + laneArea[laneId].location.name : '—'
@@ -112,13 +110,6 @@ export default function Parking({ section }) {
     {field('maxEntries', 'Maximum entries', <InputNumber min={1} max={100} />)}
     <Button htmlType="submit" type="primary" loading={busy}>{t('Pre-register / approve visitor')}</Button>
   </Form>}{table(data.visits, [...cols(['kind', 'name', 'host', 'plate', 'untilUtc', 'entries', 'maxEntries', 'revoked']), ...(can('ManageVisitors') ? [{ title: t('Action'), render: (_, v) => <Button disabled={v.revoked || busy} onClick={() => request('visits/' + v.id + '/revoke')}>{t('Revoke')}</Button> }] : [])])}</>
-  const eventColumns = [...cols(['plate', 'personId', 'laneId']), { title: t('PPE'), render: (_, e) => e.ppeOutcome ? <Tag color={e.ppeOutcome === 'Ok' ? 'green' : e.ppeOutcome === 'Warn' ? 'gold' : 'red'} title={e.ppeSummary}>{e.ppeOutcome}</Tag> : '—' }, { title: t('Area'), render: (_, e) => laneArea[e.laneId]?.area.name || '—' }, { title: t('Outcome'), dataIndex: 'outcome', render: v => <Tag color={v === 'Allow' ? 'green' : v === 'Deny' ? 'red' : 'orange'}>{t(v)}</Tag> }, ...cols(['reason', 'source', 'createdUtc']), { title: t('Decision time'), render: (_, e) => e.receivedUtc ? Math.max(0, new Date(e.createdUtc) - new Date(e.receivedUtc)) + ' ms' : '—' }, { title: t('Actions'), render: (_, e) => <Space wrap>
-    {can('OperateLane') && e.outcome === 'ManualReview' && <Button onClick={() => { setReview(e); setNote('') }}>{t('Review')}</Button>}
-    {can('OperateLane') && <Button disabled={e.outcome !== 'Allow' || busy} onClick={() => request('events/' + e.id + '/open')}>{t('Request open')}</Button>}
-    {can('ViewEvidence') && e.evidenceId && <a href={'/api' + base + '/events/' + e.id + '/evidence'} target="_blank" rel="noreferrer">{t('Evidence')}</a>}
-    {can('ViewEvidence') && cameras?.videoEnabled && <Button onClick={() => openVideo(e)}>{t('Video')}</Button>}
-    {can('ViewEvidence') && <Button onClick={() => openPhotos(e)}>{t(laneById[e.laneId]?.direction === 'Exit' ? 'Photos / entry' : 'Photos')}</Button>}
-  </Space> }]
   const simulateTab = <><Alert type="info" showIcon message={t('Shadow lanes record decisions without opening barriers. Camera results require a validated recognition model or guard review.')} style={{ marginBottom: 20 }} />
     {can('OperateLane') && <Tabs items={[
       { key: 'simulation', label: t('Simulated observation'), children: <Form layout="vertical" initialValues={{ plateConfidence: .99, faceConfidence: 0 }} onFinish={v => request('simulate', { ...v, correlationId: crypto.randomUUID() })}>
@@ -136,12 +127,6 @@ export default function Parking({ section }) {
         <Form.Item name="face" label={t('Optional face image')} valuePropName="file"><Input type="file" accept="image/jpeg,image/png" /></Form.Item>
         <Button htmlType="submit" type="primary" loading={busy}>{t('Recognize and evaluate')}</Button></Form> },
     ]} />}</>
-  const monitor = <>
-    <Space style={{ marginBottom: 4 }}>{t('Area')} <Select allowClear placeholder={t('All areas')} style={{ minWidth: 240 }} options={areaOptions} value={areaFilter} onChange={setAreaFilter} /></Space>
-    {table(data.events.filter(e => inArea(e.laneId)), eventColumns)}<Typography.Title level={4}>{t('Barrier commands')}</Typography.Title>
-    {table(data.commands.filter(c => inArea(c.laneId)), [...cols(['id', 'laneId', 'status', 'passageUtc']), { title: t('Passage'), render: (_, c) => can('OperateLane') && c.status === 'Simulated' && !c.passageUtc && <Button onClick={() => request('commands/' + c.id + '/simulate-passage')}>{t('Simulate passage')}</Button> }, ...(can('Reconcile') ? [{ title: t('Action'), render: (_, c) => (c.status === 'Unknown' || (c.status === 'Acknowledged' && !c.passageUtc)) && <Button onClick={() => { setReview({ ...c, reconcile: true }); setNote('') }}>{t('Reconcile after inspection')}</Button> }] : [])])}
-    <Typography.Title level={4}>{t('Parking sessions')}</Typography.Title>
-    {table(data.sessions || [], cols(['plate', 'entryUtc', 'exitUtc']))}</>
   // GC-44: site defaults + optional per-lane overrides. [key, label, min, max] match the server-side bounds.
   const timingFields = [['decisionValidSeconds', 'Allow decision valid (s)', 5, 300], ['reviewWindowSeconds', 'Guard review window (s)', 30, 3600],
     ['cooldownSeconds', 'Lane cooldown between commands (s)', 2, 120], ['heartbeatFreshSeconds', 'Sensor data must be newer than (s)', 2, 60],
@@ -180,12 +165,25 @@ export default function Parking({ section }) {
   // GC-25/26: severity colours, lifecycle actions; a sound plays when a new High/Critical alert arrives.
   const severityColor = s => ({ Critical: 'red', High: 'volcano', Medium: 'gold' }[s] || 'default')
   const alertLane = a => data.events.find(e => e.id === a.eventId)?.laneId || (a.reason.includes(':') ? a.reason.split(':')[1] : '')
-  const alerts = <>{table(data.alerts, [{ title: t('Severity'), dataIndex: 'severity', render: s => <Tag color={severityColor(s)}>{t(s)}</Tag> },
+  // CR-028: a barrier command whose outcome is unknown (or opened with no passage seen) blocks its lane until a guard checks the
+  // lane on site and reconciles it. That used to sit in "Passes & barrier commands"; it is now here, next to the alert it raises.
+  const unchecked = c => c.status === 'Unknown' || (c.status === 'Acknowledged' && !c.passageUtc)
+  const reconcile = c => { setReview(c); setNote('') }
+  const waiting = data.commands.filter(unchecked)
+  const alerts = <>{waiting.length > 0 && <Card size="small" title={t('Barrier commands waiting for a check') + ' · ' + waiting.length} style={{ marginBottom: 16 }}>
+    <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{t('The lane takes no new open command until this is cleared.')}</Typography.Paragraph>
+    <Table rowKey="id" size="small" pagination={false} dataSource={waiting} scroll={{ x: true }} columns={[
+      { title: t('Lane'), render: (_, c) => c.laneId }, { title: t('Time'), render: (_, c) => new Date(c.createdUtc).toLocaleString() },
+      { title: t('Status'), render: (_, c) => <Tag color={c.status === 'Unknown' ? 'red' : 'orange'}>{t(c.status === 'Unknown' ? 'BARRIER_OUTCOME_UNKNOWN' : 'Opened, no passage seen')}</Tag> },
+      ...(can('Reconcile') ? [{ title: t('Action'), render: (_, c) => <Button onClick={() => reconcile(c)}>{t('Reconcile after inspection')}</Button> }] : [])]} /></Card>}
+    {table(data.alerts, [{ title: t('Severity'), dataIndex: 'severity', render: s => <Tag color={severityColor(s)}>{t(s)}</Tag> },
     { title: t('Status'), dataIndex: 'status', render: (s, a) => <>{t(s)}{a.acknowledgedBy ? <Typography.Text type="secondary"> · {a.acknowledgedBy}</Typography.Text> : ''}</> },
     ...cols(['reason']), { title: t('Lane'), render: (_, a) => alertLane(a) || '—' }, { title: t('Area'), render: (_, a) => laneArea[alertLane(a)]?.area.name || '—' },
     { title: t('Time'), render: (_, a) => new Date(a.createdUtc).toLocaleString() },
     ...(can('HandleAlerts') ? [{ title: t('Action'), render: (_, a) => <Space>
       {a.status === 'Open' && <Button onClick={() => request('alerts/' + a.id + '/acknowledge')}>{t('Acknowledge')}</Button>}
+      {a.reason === 'BARRIER_OUTCOME_UNKNOWN' && can('Reconcile') && data.commands.find(c => c.eventId === a.eventId && unchecked(c)) &&
+        <Button onClick={() => reconcile(data.commands.find(c => c.eventId === a.eventId && unchecked(c)))}>{t('Reconcile after inspection')}</Button>}
       <Button type="primary" onClick={() => { setResolving(a); setResolveNote(''); setFalseAlarm(false) }}>{t('Resolve…')}</Button></Space> }] : [])])}
     <Modal title={t('Close alert') + ' · ' + t(resolving?.reason || '')} open={!!resolving} onCancel={() => setResolving(null)} okText={t('Close alert')} okButtonProps={{ disabled: resolveNote.trim().length < 3 }}
       onOk={async () => { if (await request('alerts/' + resolving.id + '/resolve', { note: resolveNote, falseAlarm })) setResolving(null) }}>
@@ -234,60 +232,8 @@ export default function Parking({ section }) {
       <Button type="primary" htmlType="submit" loading={busy}>{t('Save person')}</Button></Form>}
     <Button style={{ marginTop: 16 }} onClick={loadPeople}>{t('Refresh')}</Button>
     {table(people.map(p => ({ ...p, id: p.personId })), [...cols(['personId', 'name', 'code', 'active', 'validUntilUtc']), ...(can('ManagePeople') ? [{ title: t('Edit'), render: (_, p) => <Button onClick={() => personForm.setFieldsValue({ ...p, validUntilUtc: toLocalInput(p.validUntilUtc) })}>{t('Edit')}</Button> }] : [])])}</>
-  const laneById = Object.fromEntries(data.lanes.map(l => [l.id, l]))
-  const [photoFor, setPhotoFor] = useState(null)
-  const openPhotos = async e => {
-    try {
-      const photos = (await api.get(base + '/events/' + e.id + '/photos')).data
-      const entry = laneById[e.laneId]?.direction === 'Exit' ? (await api.get(base + '/events/' + e.id + '/entry')).data : null
-      setPhotoFor({ event: e, photos, entry })
-    } catch { message.error(t('Photos unavailable')) }
-  }
-  const uploadPhoto = async (file, note) => {
-    const body = new FormData(); body.append('file', file); if (note) body.append('note', note)
-    try { await api.post(base + '/events/' + photoFor.event.id + '/photos', body, { headers: { 'Content-Type': 'multipart/form-data' } }); message.success(t('Photo saved')); openPhotos(photoFor.event) }
-    catch (err) { message.error(t(err.response?.data?.message || 'Upload failed')) }
-  }
-  const grabPhoto = async () => {
-    try { await api.post(base + '/events/' + photoFor.event.id + '/photos/camera'); message.success(t('Photo saved')); openPhotos(photoFor.event) }
-    catch (err) { message.error(t(err.response?.data?.message || 'Camera photo failed')) }
-  }
-  const img = (src, label) => <div style={{ flex: '1 1 240px' }}><Typography.Text type="secondary">{label}</Typography.Text><img alt={label} src={src} style={{ width: '100%', borderRadius: 6, border: '1px solid var(--border)' }} /></div>
-  const photoModal = <Modal title={t('Photos') + ' · ' + (photoFor?.event.plate || photoFor?.event.personId || '') + ' · ' + (photoFor?.event.laneId || '')} open={!!photoFor} onCancel={() => setPhotoFor(null)} footer={null} width={960} destroyOnClose>
-    {photoFor?.entry && (photoFor.entry.found ? <><Typography.Title level={5}>{t('Entry vs exit')}</Typography.Title><Space align="start" wrap style={{ width: '100%' }}>
-        {photoFor.entry.entryAllowed && photoFor.entry.entry.evidenceId && img('/api' + base + '/events/' + photoFor.entry.entry.id + '/evidence', t('Entry') + ' · ' + photoFor.entry.entry.laneId + ' · ' + photoFor.entry.entry.createdUtc)}
-        {photoFor.event.evidenceId && img('/api' + base + '/events/' + photoFor.event.id + '/evidence', t('Exit') + ' · ' + photoFor.event.laneId + ' · ' + photoFor.event.createdUtc)}</Space></>
-      : <Alert type="warning" showIcon message={t('No entry found for this plate. Check the vehicle before opening.')} />)}
-    <Typography.Title level={5} style={{ marginTop: 16 }}>{t('Photos')} ({photoFor?.photos.length || 0})</Typography.Title>
-    <Space align="start" wrap style={{ width: '100%' }}>{photoFor?.photos.map(p => img('/api' + base + '/photos/' + p.id, p.kind + ' · ' + p.takenBy + ' · ' + new Date(p.createdUtc).toLocaleString() + (p.note ? ' · ' + p.note : '')))}</Space>
-    {can('OperateLane') && <Space style={{ marginTop: 16 }} wrap>
-      <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={ev => ev.target.files[0] && uploadPhoto(ev.target.files[0], 'inspection')} />
-      <Button onClick={grabPhoto}>{t('Take from lane camera')}</Button></Space>}
-  </Modal>
-  const [shiftForm] = Form.useForm()
-  const loadPresence = async () => { try { setPresence((await api.get(base + '/presence')).data); setShifts((await api.get(base + '/shifts')).data) } catch { setPresence(null) } }
-  const closePresence = async p => {
-    const note = window.prompt(t('Why close this presence (e.g. left through an unmonitored gate)?'))
-    if (note && note.trim().length >= 3) { await request('presence/close', { areaCode: p.areaCode, subjectKey: p.subjectKey, note }); loadPresence() }
-  }
-  const presenceTab = <><Space wrap style={{ marginBottom: 16 }}><Button onClick={loadPresence}>{t('Refresh')}</Button>
-      {presence?.areas.map(a => <Tag key={a.code} color={a.count ? 'blue' : 'default'}>{a.name}: {a.count} {t('inside')}</Tag>)}
-      {presence && <Typography.Text type="secondary">{t('Station')} {presence.station}</Typography.Text>}</Space>
-    {presence && <Table rowKey={p => p.areaCode + p.subjectKey} dataSource={presence.inside.filter(p => !areaFilter || areas.find(a => a.id === areaFilter)?.code === p.areaCode)} pagination={{ pageSize: 20 }} scroll={{ x: true }}
-      columns={[...cols(['areaCode', 'subjectName', 'shift', 'laneId', 'stationId']), { title: t('Since'), render: (_, p) => new Date(p.sinceUtc).toLocaleString() },
-        { title: t('Inside for'), render: (_, p) => <Tag color={p.overstay ? 'red' : 'default'}>{Math.floor(p.minutes / 60)} h {p.minutes % 60} {t('min')}{p.overstay ? ' · ' + t('overstay') : ''}</Tag> },
-        { title: t('Check'), render: (_, p) => p.doubleEntry ? <Tag color="orange">{t('entered twice')}</Tag> : '' },
-        ...(can('HandleAlerts') ? [{ title: t('Action'), render: (_, p) => <Button onClick={() => closePresence(p)}>{t('Close…')}</Button> }] : [])]} />}
-    {presence?.unmatched.length > 0 && <><Typography.Title level={5}>{t('Exits without an entry (missing passages)')}</Typography.Title>
-      {table(presence.unmatched.map((u, i) => ({ ...u, id: i })), cols(['areaCode', 'subjectName', 'laneId', 'stationId', 'passageUtc']))}</>}
-    <Typography.Title level={5} style={{ marginTop: 24 }}>{t('Shifts')}</Typography.Title>
-    {can('ManageSite') && <Form form={shiftForm} layout="inline" onFinish={async v => { if (await request('shifts', v, 'put')) { shiftForm.resetFields(); loadPresence() } }}>
-      <Form.Item name="id" hidden><Input /></Form.Item>
-      {field('areaId', 'Area', <Select style={{ minWidth: 180 }} options={areaOptions} />)}{field('name', 'Name', <Input maxLength={60} placeholder={t('Ca 1')} />)}
-      {field('start', 'Start (HH:mm)', <Input maxLength={5} placeholder="06:00" />)}{field('end', 'End (HH:mm)', <Input maxLength={5} placeholder="14:00" />)}
-      <Button type="primary" htmlType="submit">{t('Save shift')}</Button></Form>}
-    {table(shifts, [{ title: t('Area'), render: (_, s) => areas.find(a => a.id === s.areaId)?.name || '—' }, ...cols(['name', 'start', 'end']),
-      ...(can('ManageSite') ? [{ title: t('Action'), render: (_, s) => <Space><Button onClick={() => shiftForm.setFieldsValue(s)}>{t('Edit')}</Button><Button danger onClick={async () => { await request('shifts/' + s.id, {}, 'delete'); loadPresence() }}>{t('Delete')}</Button></Space> }] : [])])}</>
+  // CR-028: shifts are edited on the overview (Ca trực tile); the report filter still lists them.
+  const loadShifts = async () => { try { setShifts((await api.get(base + '/shifts')).data) } catch { setShifts([]) } }
   const loadWall = async () => { try { setWall((await api.get(base + '/video/wall')).data) } catch { setWall(null) } }
   const laneAlert = laneId => data.alerts.some(a => alertLane(a) === laneId && (a.severity === 'High' || a.severity === 'Critical'))
   // CR-023: camera wall; "Attach camera" on a lane without one jumps to that lane in Lane settings.
@@ -350,7 +296,7 @@ export default function Parking({ section }) {
         {field('id', 'Role code (letters, digits, - or _)', <Input maxLength={40} />)}{field('name', 'Name', <Input maxLength={100} />)}
         <Form.Item name="permissions" label={t('Permissions (ViewLive is always included)')}><Select mode="multiple" options={opts(roles.permissions)} /></Form.Item>
         <Space><Button type="primary" htmlType="submit">{t('Save role')}</Button><Button onClick={() => roleForm.resetFields()}>{t('Clear')}</Button></Space></Form></Card>}</>}</>
-  const screens = { passes: monitor, presence: presenceTab, vehicles, visitors, people: peopleTab, alerts, devices: operations, cameras: cameraTab, wall: wallTab,
+  const screens = { vehicles, visitors, people: peopleTab, alerts, devices: operations, cameras: cameraTab, wall: wallTab,
     history: historyTab, areas: areasTab, lanes: settings, displays: <DisplaySettings data={data} cameras={cameras} />, deviceInput: <DeviceInputs can={can} />,
     users: accounts, simulate: simulateTab }
   const current = SECTIONS.find(x => x.key === section)
@@ -359,18 +305,10 @@ export default function Parking({ section }) {
       <Button onClick={refresh}>{t('Refresh')}</Button></div>
     {error && <Alert type="error" message={t(error)} style={{ marginBottom: 16 }} />}
     {current && current.show(can) ? screens[section] : <Alert type="warning" showIcon message={t('You do not have access to this screen.')} />}
-    <Modal title={t(review?.reconcile ? 'Confirm physical inspection' : 'Guard review')} open={!!review} onCancel={() => setReview(null)} footer={<Space>
+    <Modal title={t('Confirm physical inspection')} open={!!review} onCancel={() => setReview(null)} footer={<Space>
       <Button onClick={() => setReview(null)}>{t('Cancel')}</Button>
-      {!review?.reconcile && <Button danger disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request('events/' + review.id + '/review', { approve: false, note })) setReview(null) }}>{t('Deny')}</Button>}
-      <Button type="primary" disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request((review.reconcile ? 'commands/' : 'events/') + review.id + (review.reconcile ? '/reconcile' : '/review'), { approve: true, note })) setReview(null) }}>{t(review?.reconcile ? 'Mark reconciled' : 'Approve')}</Button>
-    </Space>}><p>{review?.reconcile ? t('Inspect the controller and lane before clearing an unknown outcome. This never resends the command.') : t('Verify the driver and vehicle. The approval expires after the decision validity of this lane (site default ') + (timings?.decisionValidSeconds ?? 30) + ' s).'}</p>
+      <Button type="primary" disabled={note.trim().length < 3 || busy} onClick={async () => { if (await request('commands/' + review.id + '/reconcile', { approve: true, note })) setReview(null) }}>{t('Mark reconciled')}</Button>
+    </Space>}><p>{t('Inspect the controller and lane before clearing an unknown outcome. This never resends the command.')}</p>
     <Input.TextArea aria-label={t('Review reason')} value={note} onChange={e => setNote(e.target.value)} maxLength={500} placeholder={t('Record your reason')} /></Modal>
-    {photoModal}
-    <Modal title={t('Video') + ' · ' + (videoFor?.event.plate || t('unknown plate')) + ' · ' + (videoFor?.event.createdUtc || '')} open={!!videoFor} onCancel={() => setVideoFor(null)} footer={null} width={900} destroyOnClose>
-      {videoFor && !videoFor.segments.length && <Alert type="warning" message={t('No recording covers this event. Check that a camera is linked to the lane and was recording.')} />}
-      {videoFor?.segments.map(s => <div key={s.id} style={{ marginBottom: 16 }}>
-        <Typography.Text strong>{s.cameraId}</Typography.Text> · {s.startUtc} → {s.endUtc} · <Tag>{s.status}</Tag>
-        <video controls preload="metadata" style={{ width: '100%', marginTop: 8 }} src={'/api' + base + '/video/segments/' + s.id + '/play#t=' + Math.floor(s.offsetSeconds)} />
-      </div>)}
-    </Modal></>
+</>
 }

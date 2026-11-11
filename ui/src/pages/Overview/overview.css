@@ -7,6 +7,9 @@
 .ovStats span { display: block; color: var(--fg-muted); font-size: 12px; }
 .ovStats strong { color: var(--fg-strong); font: 600 24px 'IBM Plex Mono', monospace; }
 .ovStats .bad strong { color: var(--danger); }
+.ovStats small { display: block; color: var(--fg-muted); font-size: 11px; }
+.ovStats .shiftTile strong { font-family: inherit; font-size: 20px; }
+.ovStats .shiftTile.edit { cursor: pointer; } .ovStats .shiftTile.edit:hover { border-color: var(--accent); }
 
 /* PPE class bar and chips */
 .ovPpeBar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); }
@@ -18,17 +21,47 @@
 .ovPpe .chip, .ovPpeBar .legend i { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); border-color: color-mix(in srgb, var(--c) 45%, transparent); }
 .ovPpe .chip.none { opacity: .55; }
 
-/* Cửa lò: newest cards left, the full in/out table right (scrolls inside its frame, header pinned) */
-.ovMine { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 12px; align-items: start; }
+/* CR-029: manual open, one button per mine gate lane */
+.ovGateBar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); }
+
+/* Cửa lò: worker cards left, the full in/out table right, a draggable divider between (CR-027). Both lists scroll inside their frame. */
+.ovMine { display: grid; grid-template-columns: var(--split, 560px) 12px minmax(0, 1fr); align-items: stretch; }
 .ovCards, .ovTable, .ovFeed { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); overflow: hidden; }
 .ovCards > header, .ovTable > header, .ovFeed > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--fg-strong); font-weight: 600; }
-.ovCards { display: grid; gap: 8px; padding-bottom: 8px; }
-.ovCard { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0 8px; padding: 8px; border: 1px solid var(--border-sub); border-left: 3px solid var(--success); border-radius: 8px; background: var(--bg-base); }
-.ovCard.red { border-left-color: var(--danger); } .ovCard.orange { border-left-color: var(--warning); }
-.ovCard .avatar { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--bg-raised); color: var(--fg-strong); font-weight: 700; }
-.ovCard .who strong { display: block; color: var(--fg-strong); }
-.ovCard .who small { display: block; margin-bottom: 4px; color: var(--fg-muted); font-size: 12px; }
-.ovTable .wrap { max-height: max(340px, calc(100vh - 360px)); overflow: auto; }
+.ovCards, .ovTable { min-width: 0; align-self: start; }
+.ovCards { container-type: inline-size; }
+.ovCards .list, .ovTable .wrap { max-height: max(340px, calc(100vh - 360px)); overflow: auto; }
+.ovCards .list { display: grid; gap: 8px; padding: 8px; }
+
+.ovSplit { display: grid; place-items: center; cursor: col-resize; touch-action: none; outline: none; }
+.ovSplit i { width: 4px; height: 48px; border-radius: 2px; background: var(--border); transition: background .15s, height .15s; }
+.ovSplit:hover i, .ovSplit:focus-visible i, .ovSplit.dragging i { height: 96px; background: var(--accent); }
+
+/* One worker visit, sketch People.png: [FaceID / shift] | [entry photo | time, PPE] over [exit photo | time, PPE] */
+.ovVisit { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; padding: 8px; border: 1px solid var(--border-sub); border-left: 3px solid var(--success); border-radius: 8px; background: var(--bg-base); }
+.ovVisit.red { border-left-color: var(--danger); } .ovVisit.orange { border-left-color: var(--warning); }
+.ovVisit .left { display: grid; grid-template-rows: minmax(0, 1fr) auto; border: 1px solid var(--border-sub); border-radius: 6px; overflow: hidden; }
+.ovVisit .face { position: relative; display: grid; place-items: center; min-height: 120px; background: linear-gradient(160deg, hsl(var(--hue) 45% 38%), hsl(calc(var(--hue) + 40) 45% 24%)); }
+.ovVisit .face .initials { color: #fff; font-size: 30px; font-weight: 700; letter-spacing: 1px; opacity: .9; }
+.ovVisit .face .id { position: absolute; inset: auto 0 0 0; padding: 3px 6px; background: rgb(0 0 0 / .45); color: #fff; line-height: 1.25; }
+.ovVisit .face .id strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ovVisit .face .id small { display: block; font-size: 11px; opacity: .8; }
+.ovVisit .shift { padding: 4px 6px; border-top: 1px solid var(--border-sub); color: var(--fg-strong); font-size: 12px; text-align: center; }
+.ovVisit .legs { display: grid; gap: 6px; min-width: 0; }
+.ovVisit .leg { display: grid; grid-template-columns: 120px minmax(0, 1fr); grid-template-rows: auto 1fr; border: 1px solid var(--border-sub); border-radius: 6px; overflow: hidden; }
+.ovVisit .photo { position: relative; grid-row: 1 / span 2; display: grid; place-items: center; aspect-ratio: 4 / 3; background: var(--bg-raised); border-right: 1px solid var(--border-sub); }
+.ovVisit .photo a, .ovVisit .photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ovVisit .photo .none { color: var(--fg-muted); font-size: 11px; }
+.ovVisit .photo b { position: absolute; top: 3px; left: 3px; padding: 0 5px; border-radius: 3px; background: rgb(0 0 0 / .55); color: #fff; font-size: 10px; font-weight: 600; }
+.ovVisit .time { padding: 4px 8px; border-bottom: 1px solid var(--border-sub); color: var(--fg-strong); font: 600 13px 'IBM Plex Mono', monospace; }
+.ovVisit .ppe { padding: 4px 8px; }
+.ovVisit .muted { color: var(--fg-muted); }
+/* A narrow card panel: smaller photos and face box */
+@container (max-width: 420px) {
+  .ovVisit { grid-template-columns: 84px minmax(0, 1fr); }
+  .ovVisit .leg { grid-template-columns: 84px minmax(0, 1fr); }
+  .ovVisit .face .initials { font-size: 22px; }
+}
 .ovTable table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ovTable th { position: sticky; top: 0; z-index: 1; padding: 8px 10px; background: var(--bg-raised); color: var(--fg-muted); font-weight: 600; text-align: left; white-space: nowrap; }
 .ovTable td { padding: 7px 10px; border-top: 1px solid var(--border-sub); color: var(--fg); white-space: nowrap; }
@@ -64,4 +97,4 @@
 .ovFeed .who { grid-area: who; color: var(--fg); } .ovFeed .ant-tag { grid-area: tag; align-self: center; margin: 0; }
 .ovDetail { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0; } .ovDetail dt { color: var(--fg-muted); } .ovDetail dd { margin: 0; }
 
-@media (max-width: 1100px) { .ovMine, .ovWall { grid-template-columns: 1fr; } .ovFeed { position: static; } }
+@media (max-width: 1100px) { .ovMine, .ovWall { grid-template-columns: 1fr; gap: 12px; } .ovSplit { display: none; } .ovFeed { position: static; } }

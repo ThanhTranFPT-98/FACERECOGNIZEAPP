@@ -77,6 +77,13 @@ public class ReviewInput
     public bool Approve { get; set; }
     [Required, StringLength(500, MinimumLength = 3)] public string Note { get; set; } = "";
 }
+public class ManualOpenInput
+{
+    [Required, StringLength(40)] public string Reason { get; set; } = "";
+    [StringLength(500)] public string? Note { get; set; }
+    [StringLength(24)] public string? Plate { get; set; }
+    [Range(1, int.MaxValue)] public int? PersonId { get; set; }
+}
 public class HeartbeatInput
 {
     [Required, StringLength(40)] public string LaneId { get; set; } = "";
@@ -203,6 +210,10 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
         lane.Policy = AccessPolicy.FromSwitches(lane.Subject, input.Plate, input.Face);
         db.Log(Actor, "SwitchRecognition", id + ":" + lane.Policy); return lane;
     });
+    // CR-029: guard's manual open; goes through ParkingService.Open like every pass.
+    [HttpPost("lanes/{id}/manual-open"), Authorize(Policy = Perm.OperateLane)]
+    public async Task<IActionResult> ManualOpen(string id, ManualOpenInput input) => await Execute(async () => {
+        await scope.Ensure(id); return await service.ManualOpen(id, input.Reason, input.Note, input.Plate, input.PersonId, Actor); });
     [HttpPost("simulate"), Authorize(Policy = Perm.OperateLane)]
     public async Task<IActionResult> Simulate(SimulatedObservation input) => await Execute(async () => { await scope.Ensure(input.LaneId); return await service.Observe(input.LaneId, input.CorrelationId,
         new(input.Plate, input.PlateConfidence, input.PersonId, input.FaceConfidence, "simulation"), Actor, "Simulation"); });

@@ -451,6 +451,32 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     Check((await service.Open(fourth.Id, "guard", automatic: false)).Status == "Simulated", "A guard's own click is not re-checked against the track (the guard is looking at the person)");
 }
 
+// ---- CR-029: guard's manual open goes through the same decision → command chain ----
+{
+    Check(ManualOpenRules.Check("VISITOR", null) is null && ManualOpenRules.Check("OTHER", "  ") is not null && ManualOpenRules.Check("OTHER", "cổng phụ") is null
+        && ManualOpenRules.Check("OPEN_NOW", null) is not null, "CR-029 reasons: a known code; OTHER needs a note");
+    using var manualConnection = new SqliteConnection("Data Source=:memory:");
+    manualConnection.Open();
+    using var mdb = new ParkingDb(new DbContextOptionsBuilder<ParkingDb>().UseSqlite(manualConnection).Options);
+    await mdb.Database.MigrateAsync();
+    mdb.Lanes.Add(new Lane { Id = "gate-1", Subject = "Vehicle", Policy = "PlateOnly", Direction = "Entry", ShadowMode = false, Simulation = true, CooldownSeconds = 0 });
+    mdb.Lanes.Add(new Lane { Id = "gate-shadow", Subject = "Vehicle", Policy = "PlateOnly", Direction = "Entry", ShadowMode = true, Simulation = true, CooldownSeconds = 0 });
+    mdb.Vehicles.Add(new RegisteredVehicle { Plate = "30A-999.99", NormalizedPlate = "30A99999", Owner = "x", Blocked = true });
+    await mdb.SaveChangesAsync();
+    var manual = new ParkingService(mdb, new ParkingLock(), new ConfigurationBuilder().Build(), null!, new NoHub(), null!, new PpeCache(), new AutoOpenQueue());
+    var opened = await manual.ManualOpen("gate-1", "VISITOR", "xe giao hàng", "51F-123.45", null, "guard1");
+    var manualEvent = await mdb.Events.AsNoTracking().SingleAsync(x => x.Id == opened.EventId);
+    Check(opened.Status == "Simulated" && manualEvent is { Outcome: "Allow", Source: "Guard", Reason: "GUARD_MANUAL_OPEN:VISITOR", ReviewBy: "guard1", Plate: "51F12345" }
+        && await mdb.Audit.AnyAsync(x => x.Action.StartsWith("ManualOpen:VISITOR")), "CR-029 a manual open is a stored, audited decision, then a normal command");
+    var shadow = await Assert.ThrowsAsync<InvalidOperationException>(() => manual.ManualOpen("gate-shadow", "VISITOR", null, null, null, "guard1"));
+    Check(shadow.Message.StartsWith("Shadow mode") && !await mdb.Commands.AnyAsync(x => x.LaneId == "gate-shadow"), "CR-029 shadow mode still refuses a manual open");
+    var blocked = await Assert.ThrowsAsync<InvalidOperationException>(() => manual.ManualOpen("gate-1", "PRIORITY_VEHICLE", null, "30A-999.99", null, "guard1"));
+    Check(blocked.Message.Contains("revoked"), "CR-029 a blocked vehicle is not let through by hand");
+    await Assert.ThrowsAsync<InvalidOperationException>(() => manual.ManualOpen("gate-1", "OTHER", "", null, null, "guard1"));
+    await Assert.ThrowsAsync<InvalidOperationException>(() => manual.ManualOpen("gate-1", "VISITOR", null, null, 404, "guard1"));
+    Check(await mdb.Events.CountAsync(x => x.Source == "Guard") == 3, "CR-029 a missing reason or an unknown person stores nothing");
+}
+
 // ---- CR-009: gate operations ----
 {
     var site = new SiteSettings();   // Asia/Ho_Chi_Minh (UTC+7), reset at 00:00 local
@@ -481,6 +507,10 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     Check(visits.Select(x => x.SubjectKey).SequenceEqual(new[] { "W1", "W2", "W1" }) && visits[0].OutUtc is null && visits[2].OutUtc == t0.AddMinutes(30),
         "CR-025 visits: newest entry first, each exit closes its entry, still inside has no exit");
     Check(visits.All(x => x.SubjectKey != "W3"), "CR-025 visits: an exit without an entry is not a visit");
+    var w1Out = P("W1", "Out", 30);
+    var paired = PresenceBook.Visits([w1Out, P("W1", "In", 10), P("W2", "In", 12)]);
+    Check(paired.Single(x => x.SubjectKey == "W1").OutEventId == w1Out.EventId && paired.Single(x => x.SubjectKey == "W2").OutEventId is null,
+        "CR-027 visits: the exit's event is kept for its photo and PPE; still inside has none");
     var shifts = new[] { new Shift { Name = "Ca 1", Start = "06:00", End = "14:00" }, new Shift { Name = "Ca 3", Start = "22:00", End = "06:00" } };
     Check(PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 7, 30, 0)) == "Ca 1" && PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 2, 0, 0)) == "Ca 3"
         && PresenceBook.ShiftAt(shifts, new DateTime(2026, 9, 25, 15, 0, 0)) is null, "Shift lookup handles day and overnight shifts");

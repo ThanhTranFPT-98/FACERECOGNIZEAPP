@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Dropdown, Empty, Form, Input, Modal, Segmented, Select, Switch, Tag, Tooltip, message } from 'antd'
-import { CarOutlined, LockOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Dropdown, Empty, Form, Input, Modal, Segmented, Select, Space, Switch, Table, Tag, Tooltip, message } from 'antd'
+import { CarOutlined, PlusOutlined, UnlockOutlined, UserOutlined } from '@ant-design/icons'
 import * as signalR from '@microsoft/signalr'
 import api from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
@@ -61,7 +61,7 @@ export default function Overview() {
     </div>
     {error && <Alert type="warning" showIcon message={t(error)} style={{ marginBottom: 12 }} />}
     {view === 'mine'
-      ? <MineBoard lanes={lanes.filter(l => laneKind(l) === 'Person')} events={data.events} visits={visits.filter(v => v.subjectKey.startsWith('P:'))} people={people} name={name} />
+      ? <MineBoard lanes={lanes.filter(l => laneKind(l) === 'Person')} events={data.events} visits={visits.filter(v => v.subjectKey.startsWith('P:'))} people={people} photos={can('ViewEvidence')} can={can} act={act} />
       : <LaneWall lanes={lanes.filter(l => laneKind(l) !== 'Person')} data={data} name={name} can={can} act={act} />}
   </div>
 }
@@ -70,9 +70,67 @@ function PpeChips({ classes, items }) {
   return <span className="ovPpe">{classes.map(c => <span key={c} className={'chip ' + (items[c] === undefined ? 'none' : items[c] ? 'ok' : 'miss')} title={ppeLabel(c)}>{ppeLabel(c)}</span>)}</span>
 }
 
-function MineBoard({ lanes, events, visits, people, name }) {
-  const entryLanes = new Set(lanes.filter(l => l.direction === 'Entry').map(l => l.id))
-  const passes = events.filter(e => entryLanes.has(e.laneId) && e.personId)
+// CR-027: the FaceID box of a worker card. The station has no registered face photo yet (faces are enrolled on the devices);
+// when a device can hand one over, show it here. Until then: a generated avatar, its colour fixed by the person ID.
+function FaceBox({ personId, name, code }) {
+  const hue = ((Number(personId) || 0) * 137) % 360
+  return <div className="face" style={{ '--hue': hue }} title={name}>
+    <span className="initials">{initials(name)}</span>
+    <span className="id"><strong>{name}</strong><small>{code}</small></span>
+  </div>
+}
+
+// The overview photo the gate camera sent with that passage (= the event's evidence on a person lane).
+function Photo({ eventId, has, allowed, label }) {
+  const [broken, setBroken] = useState(false)
+  const src = '/api' + base + '/events/' + eventId + '/evidence'
+  return <div className="photo">
+    {eventId && has && allowed && !broken
+      ? <a href={src} target="_blank" rel="noreferrer"><img alt={label} loading="lazy" src={src} onError={() => setBroken(true)} /></a>
+      : <span className="none">{t(eventId ? 'No photo' : '—')}</span>}
+    <b>{label}</b>
+  </div>
+}
+
+// One half of a card: photo | time over PPE (sketch People.png).
+function Leg({ label, eventId, has, allowed, time, ppe, classes, pending }) {
+  return <div className="leg">
+    <Photo eventId={eventId} has={has} allowed={allowed} label={label} />
+    <div className="time">{pending ? <Tag color="gold">{t('Not out yet')}</Tag> : time}</div>
+    <div className="ppe">{!pending && (ppe === undefined ? <span className="muted">—</span> : <PpeChips classes={classes} items={ppeItems(ppe)} />)}</div>
+  </div>
+}
+
+const visitColor = v => (!v.ppeOutcome || v.ppeOutcome === 'Ok' ? 'green' : v.ppeOutcome === 'Warn' ? 'orange' : 'red')
+
+// CR-027: the divider between the cards and the table. Drag it, or focus it and use the arrow keys; double-click resets.
+const SPLIT_KEY = 'overview.split', SPLIT_DEFAULT = 560, SPLIT_MIN = 300, TABLE_MIN = 380
+function useSplit(box) {
+  const [width, setWidth] = useState(() => remember(SPLIT_KEY, SPLIT_DEFAULT))
+  const fit = w => Math.round(Math.max(SPLIT_MIN, Math.min(w, (box.current?.clientWidth || 1200) - TABLE_MIN)))
+  const set = w => { const v = fit(w); setWidth(v); keep(SPLIT_KEY, v) }
+  const handle = {
+    role: 'separator', 'aria-orientation': 'vertical', 'aria-valuenow': width, tabIndex: 0, title: t('Drag to resize'),
+    onPointerDown: e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); e.currentTarget.classList.add('dragging') },
+    onPointerMove: e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) setWidth(fit(e.clientX - box.current.getBoundingClientRect().left)) },
+    onPointerUp: e => { e.currentTarget.classList.remove('dragging'); e.currentTarget.releasePointerCapture(e.pointerId); set(e.clientX - box.current.getBoundingClientRect().left) },
+    onKeyDown: e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); set(width + (e.key === 'ArrowLeft' ? -24 : 24)) } },
+    onDoubleClick: () => set(SPLIT_DEFAULT),
+  }
+  // A smaller window may leave the stored width too wide: fit it again.
+  useEffect(() => { const again = () => setWidth(w => fit(w)); again(); window.addEventListener('resize', again); return () => window.removeEventListener('resize', again) }, [])
+  return [width, handle]
+}
+
+function MineBoard({ lanes, events, visits, people, photos, can, act }) {
+  const box = useRef(null)
+  const [split, handle] = useSplit(box)
+  const [shifts, setShifts] = useState([]), [areas, setAreas] = useState([]), [editShifts, setEditShifts] = useState(false)
+  const loadShifts = async () => { try { const [s, a] = await Promise.all([api.get(base + '/shifts'), api.get(base + '/areas')]); setShifts(s.data); setAreas(a.data) } catch { /* the tile shows "No shift" */ } }
+  useEffect(() => { loadShifts() }, [])
+  // CR-028: the shift on duty now at the areas of the mine gate lanes (station clock = this PC's clock).
+  const gateAreas = new Set(areas.filter(a => a.locations.some(l => l.lanes.some(id => lanes.some(x => x.id === id)))).map(a => a.id))
+  const onDuty = shifts.filter(s => (!gateAreas.size || gateAreas.has(s.areaId)) && shiftCovers(s, new Date()))
   // Classes come from the lane rules and from what the AI box reported; ⊕ adds a class to the board when the model learns a new one.
   const known = [...new Set([...PPE_ITEMS, ...lanes.flatMap(l => Object.keys(parsePpe(l.ppeRules))), ...events.flatMap(e => Object.keys(ppeItems(e.ppeSummary)))])]
   const [shown, setShown] = useState(() => remember(PPE_KEY, null))
@@ -85,6 +143,10 @@ function MineBoard({ lanes, events, visits, people, name }) {
   if (!lanes.length) return <Empty description={t('No mine gate lane yet. Add a Person lane in Lane settings, or run scripts/demo_station.py for a demo.')} />
   return <>
     <div className="ovStats">
+      <div className={'shiftTile' + (can('ManageSite') ? ' edit' : '')} onClick={() => can('ManageSite') && setEditShifts(true)} title={can('ManageSite') ? t('Click to set up shifts') : undefined}>
+        <span>{t('Shift on duty')}</span>
+        <strong>{onDuty.length ? [...new Set(onDuty.map(s => s.name))].join(', ') : '—'}</strong>
+        <small>{onDuty.length ? onDuty[0].start + '–' + onDuty[0].end : t('No shift')}</small></div>
       <div><span>{t('Inside now')}</span><strong>{inside}</strong></div>
       <div><span>{t('Entries (24 h)')}</span><strong>{visits.length}</strong></div>
       <div className={missing ? 'bad' : ''}><span>{t('PPE missing at entry')}</span><strong>{missing}</strong></div>
@@ -98,17 +160,26 @@ function MineBoard({ lanes, events, visits, people, name }) {
       </Dropdown>
       <span className="legend"><i className="ok" />{t('Detected')} <i className="miss" />{t('Missing')} <i className="none" />{t('No data')}</span>
     </div>
-    <div className="ovMine">
+    {can('OperateLane') && <div className="ovGateBar"><b>{t('Manual open')}</b>
+      {lanes.map(l => <ManualOpen key={l.id} lane={l} last={events.find(e => e.laneId === l.id)} people={people} act={act} label={laneName(l)} />)}</div>}
+    <div className="ovMine" ref={box} style={{ '--split': split + 'px' }}>
       <section className="ovCards">
         <header>{t('Latest at the gate')}</header>
-        {passes.slice(0, 5).map(e => <article key={e.id} className={'ovCard ' + outcomeColor(e.outcome)}>
-          <div className="avatar">{initials(name(e.personId))}</div>
-          <div className="who"><strong>{name(e.personId)}</strong><small>{people[e.personId]?.code || '#' + e.personId} · {hhmm(e.createdUtc)} · {e.laneId}</small>
-            <PpeChips classes={classes} items={ppeItems(e.ppeSummary)} /></div>
-          <Tag color={outcomeColor(e.outcome)}>{t(e.outcome)}</Tag>
-        </article>)}
-        {!passes.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('Nobody has passed yet')} />}
+        <div className="list">
+          {visits.slice(0, 30).map(v => <article key={v.inEventId} className={'ovVisit ' + visitColor(v)}>
+            <div className="left">
+              <FaceBox personId={v.personId} name={v.subjectName} code={people[v.personId]?.code || (v.personId ? '#' + v.personId : '')} />
+              <div className="shift">{v.shift || t('No shift')}</div>
+            </div>
+            <div className="legs">
+              <Leg label={t('Entry')} eventId={v.inEventId} has={v.inPhoto} allowed={photos} time={hhmm(v.inUtc)} ppe={v.ppeSummary ?? undefined} classes={classes} />
+              <Leg label={t('Exit')} eventId={v.outEventId} has={v.outPhoto} allowed={photos} time={v.outUtc && hhmm(v.outUtc)} ppe={v.outEventId ? v.outPpeSummary ?? undefined : undefined} classes={classes} pending={!v.outUtc} />
+            </div>
+          </article>)}
+          {!visits.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('Nobody has passed yet')} />}
+        </div>
       </section>
+      <div className="ovSplit" {...handle}><i /></div>
       <section className="ovTable">
         <header><span>{t('In / out in the last 24 h')} · {rows.length}</span><Input.Search allowClear size="small" placeholder={t('Name or code')} onChange={e => setQuery(e.target.value)} style={{ width: 200 }} /></header>
         <div className="wrap"><table>
@@ -122,6 +193,71 @@ function MineBoard({ lanes, events, visits, people, name }) {
         </table>{!rows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('No entries in the last 24 h')} />}</div>
       </section>
     </div>
+    <ShiftEditor open={editShifts} onClose={() => setEditShifts(false)} shifts={shifts} areas={areas} reload={loadShifts} />
+  </>
+}
+
+// "06:00"–"14:00", or across midnight "22:00"–"06:00" (same rule as PresenceBook.ShiftAt on the server).
+const minutes = hm => { const [h, m] = (hm || '').split(':').map(Number); return h * 60 + m }
+function shiftCovers(s, now) {
+  const m = now.getHours() * 60 + now.getMinutes(), start = minutes(s.start), end = minutes(s.end)
+  return start <= end ? m >= start && m < end : m >= start || m < end
+}
+
+// CR-028: shift setup, moved here from the removed "Inside now" screen. ManageSite only; refused by the server while the cloud owns the list.
+function ShiftEditor({ open, onClose, shifts, areas, reload }) {
+  const [form] = Form.useForm()
+  const call = async (method, url, data) => {
+    try { await api.request({ method, url: base + url, data }); message.success(t('Saved')); form.resetFields(); reload() }
+    catch (e) { message.error(t(e.response?.data?.message || 'Request failed')) }
+  }
+  const areaName = id => areas.find(a => a.id === id)?.name || '—'
+  return <Modal open={open} onCancel={onClose} footer={null} width={720} title={t('Shifts')}>
+    <Form form={form} layout="inline" style={{ rowGap: 8, marginBottom: 12 }} onFinish={v => call('put', '/shifts', v)}>
+      <Form.Item name="id" hidden><Input /></Form.Item>
+      <Form.Item name="areaId" rules={[{ required: true, message: t('Area') }]}><Select placeholder={t('Area')} style={{ minWidth: 170 }} options={areas.map(a => ({ value: a.id, label: a.name }))} /></Form.Item>
+      <Form.Item name="name" rules={[{ required: true, message: t('Name') }]}><Input placeholder={t('Ca 1')} maxLength={60} style={{ width: 110 }} /></Form.Item>
+      <Form.Item name="start" rules={[{ required: true, pattern: /^([01]\d|2[0-3]):[0-5]\d$/, message: 'HH:mm' }]}><Input placeholder="06:00" maxLength={5} style={{ width: 80 }} /></Form.Item>
+      <Form.Item name="end" rules={[{ required: true, pattern: /^([01]\d|2[0-3]):[0-5]\d$/, message: 'HH:mm' }]}><Input placeholder="14:00" maxLength={5} style={{ width: 80 }} /></Form.Item>
+      <Button type="primary" htmlType="submit">{t('Save shift')}</Button>
+    </Form>
+    <Table rowKey="id" size="small" pagination={false} dataSource={shifts} columns={[
+      { title: t('Area'), render: (_, s) => areaName(s.areaId) }, { title: t('Name'), dataIndex: 'name' }, { title: t('Start (HH:mm)'), dataIndex: 'start' }, { title: t('End (HH:mm)'), dataIndex: 'end' },
+      { title: t('Action'), render: (_, s) => <Space><Button size="small" onClick={() => form.setFieldsValue(s)}>{t('Edit')}</Button><Button size="small" danger onClick={() => call('delete', '/shifts/' + s.id)}>{t('Delete')}</Button></Space> }]} />
+  </Modal>
+}
+
+// CR-029: a guard opens the lane by hand. The station stores it as the guard's decision and sends the same Open command as any pass,
+// so every safety gate still applies (shadow mode, sensors, arm closed, no unresolved command). There is no close: the controller
+// lowers the arm itself when its sensors allow.
+const MANUAL_REASONS = [['RECOGNITION_FAILED', 'Recognition failed'], ['VISITOR', 'Visitor'], ['PRIORITY_VEHICLE', 'Priority vehicle'], ['OTHER', 'Other']]
+function ManualOpen({ lane, last, people, act, label }) {
+  const [open, setOpen] = useState(null), [busy, setBusy] = useState(false)
+  const [form] = Form.useForm()
+  const person = laneKind(lane) === 'Person'
+  const reason = Form.useWatch('reason', form)
+  // Pre-filled from the lane's last pass; the form is created fresh each time the dialog opens (destroyOnClose).
+  const start = () => setOpen({ reason: 'RECOGNITION_FAILED', note: '', plate: person ? undefined : last?.plate || '', personId: person ? last?.personId ?? undefined : undefined })
+  const send = async v => {
+    setBusy(true)
+    const ok = await act(`lanes/${lane.id}/manual-open`, { reason: v.reason, note: v.note?.trim() || null, plate: v.plate?.trim() || null, personId: v.personId ?? null })
+    setBusy(false)
+    if (ok) { message.success(t('Barrier opened by hand')); setOpen(null) }
+  }
+  return <>
+    <Button size="small" icon={<UnlockOutlined />} onClick={start}>{label}</Button>
+    <Modal open={!!open} title={t('Manual open') + ' · ' + laneName(lane)} okText={t('Open barrier')} confirmLoading={busy} onCancel={() => setOpen(null)} onOk={() => form.submit()} destroyOnClose>
+      {open && <Form form={form} layout="vertical" initialValues={open} onFinish={send}>
+        <Form.Item name="reason" label={t('Reason')}><Segmented block options={MANUAL_REASONS.map(([value, text]) => ({ value, label: t(text) }))} /></Form.Item>
+        <Form.Item name="note" label={t('Note')} rules={reason === 'OTHER' ? [{ required: true, min: 3, whitespace: true, message: t('Reason (at least 3 characters)') }] : []}>
+          <Input.TextArea rows={2} maxLength={500} placeholder={reason === 'OTHER' ? t('Reason (at least 3 characters)') : t('Optional')} /></Form.Item>
+        {person
+          ? <Form.Item name="personId" label={t('Who is passing (counted inside / out)')}><Select allowClear showSearch optionFilterProp="label" placeholder={t('Nobody named')}
+              options={Object.values(people || {}).map(p => ({ value: p.personId, label: p.name + (p.code ? ' · ' + p.code : '') }))} /></Form.Item>
+          : <Form.Item name="plate" label={t('Plate (for the parking session)')}><Input maxLength={24} placeholder="30A-123.45" /></Form.Item>}
+        <Alert type="info" showIcon message={t('The barrier opens only if the lane is safe: sensors healthy, arm closed, no pending command. It closes by itself after the passage.')} />
+      </Form>}
+    </Modal>
   </>
 }
 
@@ -178,7 +314,7 @@ function LaneWall({ lanes, data, name, can, act }) {
             {e && e.outcome === 'Allow' && !opened.has(e.id) && new Date(e.expiresUtc) > Date.now() && operate &&
               <Button size="small" type="primary" onClick={() => act(`events/${e.id}/open`)}>{t('Open barrier')}</Button>}
             <span className="spacer" />
-            <Tooltip title={t('Emergency open without a recognition: coming in the next release')}><Button size="small" icon={<LockOutlined />} disabled>{t('Emergency open')}</Button></Tooltip>
+            {operate && <ManualOpen lane={l} last={e} act={act} label={t('Manual open')} />}
           </footer>
         </article>
       })}</div>

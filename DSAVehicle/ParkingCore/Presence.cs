@@ -45,7 +45,7 @@ public class SyncCursor
 
 public sealed record InsideEntry(string AreaCode, string SubjectKey, string SubjectName, DateTime SinceUtc, string LaneId, string StationId, string? Shift, bool DoubleEntry);
 public sealed record UnmatchedExit(string AreaCode, string SubjectKey, string SubjectName, DateTime PassageUtc, string LaneId, string StationId);
-public sealed record VisitRow(string AreaCode, string SubjectKey, string SubjectName, DateTime InUtc, string InLaneId, Guid InEventId, DateTime? OutUtc, string? OutLaneId);
+public sealed record VisitRow(string AreaCode, string SubjectKey, string SubjectName, DateTime InUtc, string InLaneId, Guid InEventId, DateTime? OutUtc, string? OutLaneId, Guid? OutEventId = null);
 
 public static class PresenceBook
 {
@@ -77,7 +77,7 @@ public static class PresenceBook
         {
             var key = (r.AreaCode, r.SubjectKey);
             if (r.Direction == "In") { open[key] = rows.Count; rows.Add(new(r.AreaCode, r.SubjectKey, r.SubjectName, r.PassageUtc, r.LaneId, r.EventId, null, null)); }
-            else if (open.Remove(key, out var index)) rows[index] = rows[index] with { OutUtc = r.PassageUtc, OutLaneId = r.LaneId };
+            else if (open.Remove(key, out var index)) rows[index] = rows[index] with { OutUtc = r.PassageUtc, OutLaneId = r.LaneId, OutEventId = r.EventId };
         }
         return rows.OrderByDescending(x => x.InUtc).ToList();
     }
@@ -185,7 +185,7 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
         };
     }
 
-    // CR-025: entries and exits of the last hours for the overview boards, with the PPE verdict of each entry.
+    // CR-025: entries and exits of the last hours for the overview boards, with the PPE verdict of each entry (CR-027: and of each exit, shift, photos).
     [HttpGet("presence/visits")]
     public async Task<object> Visits(int hours = 24)
     {
@@ -193,11 +193,14 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
         var codes = await db.Areas.AsNoTracking().Where(a => visible == null || visible.Contains(a.Id)).Select(a => a.Code).ToListAsync();
         var since = DateTime.UtcNow.AddHours(-Math.Clamp(hours, 1, 168));
         var rows = PresenceBook.Visits(await db.Presence.AsNoTracking().Where(x => x.PassageUtc >= since && codes.Contains(x.AreaCode)).ToListAsync()).Take(1000).ToList();
-        var ids = rows.Select(x => x.InEventId).ToList();
-        var entries = await db.Events.AsNoTracking().Where(e => ids.Contains(e.Id)).Select(e => new { e.Id, e.PersonId, e.Plate, e.PpeOutcome, e.PpeSummary }).ToDictionaryAsync(e => e.Id);
-        return rows.Select(x => { var e = entries.GetValueOrDefault(x.InEventId);
-            return new { x.AreaCode, x.SubjectKey, x.SubjectName, x.InUtc, x.InLaneId, x.InEventId, x.OutUtc, x.OutLaneId,
-                personId = e?.PersonId, plate = e?.Plate, ppeOutcome = e?.PpeOutcome, ppeSummary = e?.PpeSummary }; });
+        // CR-027: the exit event too, for the exit photo and the PPE seen on the way out. A manual close has no event.
+        var ids = rows.Select(x => x.InEventId).Concat(rows.Where(x => x.OutEventId.HasValue).Select(x => x.OutEventId!.Value)).Distinct().ToList();
+        var events = await db.Events.AsNoTracking().Where(e => ids.Contains(e.Id))
+            .Select(e => new { e.Id, e.PersonId, e.Plate, e.PpeOutcome, e.PpeSummary, e.Shift, photo = e.EvidenceId != null }).ToDictionaryAsync(e => e.Id);
+        return rows.Select(x => { var e = events.GetValueOrDefault(x.InEventId); var o = x.OutEventId is Guid outId ? events.GetValueOrDefault(outId) : null;
+            return new { x.AreaCode, x.SubjectKey, x.SubjectName, x.InUtc, x.InLaneId, x.InEventId, x.OutUtc, x.OutLaneId, outEventId = o?.Id,
+                personId = e?.PersonId, plate = e?.Plate, ppeOutcome = e?.PpeOutcome, ppeSummary = e?.PpeSummary, shift = e?.Shift, inPhoto = e?.photo == true,
+                outPpeOutcome = o?.PpeOutcome, outPpeSummary = o?.PpeSummary, outPhoto = o?.photo == true }; });
     }
 
     // A guard closes a presence that will never get its exit (e.g. exit through an unmonitored gate). Audited, never silent.

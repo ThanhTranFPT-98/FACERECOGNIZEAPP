@@ -96,6 +96,32 @@ public sealed class ParkingService(ParkingDb db, ParkingLock mutex, IConfigurati
         finally { mutex.Gate.Release(); }
     }
 
+    // CR-029: a guard opens a lane by hand. The guard's choice is stored as a decision (event) first, then goes through the same Open
+    // as every pass: all hardware gates still apply; only the policy re-check is skipped, as for a guard approval (ReviewBy set).
+    public async Task<DeviceCommand> ManualOpen(string laneId, string reason, string? note, string? plate, int? personId, string actor)
+    {
+        if (ManualOpenRules.Check(reason, note) is string problem) throw new InvalidOperationException(problem);
+        AccessEvent entry;
+        await mutex.Gate.WaitAsync();
+        try
+        {
+            db.ChangeTracker.Clear();
+            var lane = await db.Lanes.FindAsync(laneId) ?? throw new InvalidOperationException("Lane not found.");
+            if (personId is int id && !await db.People.AnyAsync(x => x.PersonId == id)) throw new InvalidOperationException("Person not found.");
+            var now = DateTime.UtcNow;
+            entry = new AccessEvent { LaneId = lane.Id, CorrelationId = "manual:" + Guid.NewGuid(), Plate = VietnamPlate.Normalize(plate ?? ""), PersonId = personId,
+                ModelVersion = "manual", Source = "Guard", Outcome = "Allow", Reason = "GUARD_MANUAL_OPEN:" + reason, ReviewBy = actor,
+                ReviewNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim(), ExpiresUtc = now + (await db.Timings(lane)).DecisionValid,
+                ReceivedUtc = now, CreatedUtc = now, Shift = await ShiftFor(lane, now) };
+            db.Events.Add(entry);
+            db.Log(actor, "ManualOpen:" + reason + (entry.ReviewNote is null ? "" : ":" + entry.ReviewNote), entry.Id);
+            await db.SaveChangesAsync();
+        }
+        finally { mutex.Gate.Release(); }
+        await hub.Clients.All.SendAsync("ParkingChanged", new { eventId = entry.Id });
+        return await Open(entry.Id, actor);
+    }
+
     public async Task<DeviceCommand> Open(Guid id, string actor, bool automatic = false)
     {
         DeviceCommand command; string laneId; DateTime expires;
@@ -356,6 +382,15 @@ public sealed class ParkingService(ParkingDb db, ParkingLock mutex, IConfigurati
     }
     private record PlateResult(string Plate, double Confidence, string ModelVersion);
     private record BridgeAck(Guid CommandId, bool Accepted);
+}
+// CR-029: the quick reasons a guard picks for a manual open. "OTHER" needs a note.
+public static class ManualOpenRules
+{
+    public static readonly string[] Reasons = ["RECOGNITION_FAILED", "VISITOR", "PRIORITY_VEHICLE", "OTHER"];
+    public static string? Check(string? reason, string? note) =>
+        !Reasons.Contains(reason) ? "Choose a reason for the manual open."
+        : reason == "OTHER" && (note?.Trim().Length ?? 0) < 3 ? "Write the reason (at least 3 characters)."
+        : note?.Length > 500 ? "The note is too long (500 characters at most)." : null;
 }
 public static class EvidenceStorage
 {
