@@ -837,5 +837,19 @@
  "Operations": "Vận hành",
  "Records": "Danh mục",
  "Reports": "Báo cáo",
- "You do not have access to this screen.": "Tài khoản của bạn không có quyền xem màn hình này."
+ "You do not have access to this screen.": "Tài khoản của bạn không có quyền xem màn hình này.",
+ "Draw the region this camera watches": "Vẽ vùng camera này giám sát",
+ "Click the picture to drop the corners, in order, around the area of this lane. No region means the whole image.": "Bấm lên ảnh để đặt lần lượt các đỉnh quanh khu vực của làn này. Không vẽ gì nghĩa là lấy toàn khung hình.",
+ "Still from the AI box": "Ảnh từ AI Box",
+ "Reload": "Tải lại",
+ "No picture from the AI box. Open its page in a browser, allow the camera, then press Reload.": "Chưa có ảnh từ AI Box. Mở trang của nó trên trình duyệt, cho phép dùng camera rồi bấm Tải lại.",
+ "Undo point": "Bỏ đỉnh cuối",
+ "Whole image": "Toàn khung hình",
+ "Use this region": "Dùng vùng này",
+ "A region needs at least 3 points, or none at all.": "Một vùng cần ít nhất 3 đỉnh, hoặc không vẽ đỉnh nào.",
+ "points": "đỉnh",
+ "No region: the whole image belongs to this lane.": "Chưa vẽ vùng: toàn khung hình thuộc về làn này.",
+ "Draw region": "Vẽ vùng ROI",
+ "Region watched (PPE AI box only)": "Vùng giám sát (chỉ dành cho AI Box PPE)",
+ "A PPE box reports which region each person stands in. Leave it empty when the box watches this lane alone.": "AI Box PPE báo về mỗi người đang đứng ở vùng nào. Để trống nếu box chỉ canh riêng làn này."
 }

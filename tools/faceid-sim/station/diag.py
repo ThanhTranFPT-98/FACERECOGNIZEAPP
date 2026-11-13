@@ -1,6 +1,6 @@
 """
-One-screen check of the demo chain: simulator -> station -> cloud. Read-only.
-  python station/diag.py [--data ~/.local/share/dsa-tram] [--sim http://localhost:8095]
+One-screen check of the demo chain: FaceID simulator + PPE box -> station -> cloud. Read-only.
+  python station/diag.py [--data ~/.local/share/dsa-tram] [--sim http://localhost:8095] [--ppe http://localhost:8096]
 """
 import argparse
 import json
@@ -21,6 +21,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--data", default=os.path.expanduser(os.environ.get("TRAM_DATA", "~/.local/share/dsa-tram")))
     p.add_argument("--sim", default=f"http://localhost:{os.environ.get('FACESIM_PORT', '8095')}")
+    p.add_argument("--ppe", default=f"http://localhost:{os.environ.get('PPEBOX_PORT', '8096')}")
     a = p.parse_args()
 
     print("== Simulator", a.sim)
@@ -32,6 +33,23 @@ def main():
             print(f"   {e['created'][11:19]}  PIN {e['pin']:<9} điểm {e['score']:<6} {e['status']:<9} {e['detail']}")
     else:
         print("  ", status)
+
+    print("== AI Box PPE", a.ppe)
+    box = fetch(a.ppe + "/api/status")
+    if isinstance(box, dict):
+        last = box.get("last") or {}
+        seen = box.get("secondsSinceFrame")
+        print(f"   thiet bi {box['deviceId']} · che do {box['mode']} · theo doi {', '.join(box['items'])} · "
+              f"khoa receiver {'OK' if box['receiverKeySet'] else 'CHUA DAT'}")
+        print(f"   vung ROI: {box['roiSource']}{' · ' + box['roiError'] if box['roiError'] else ''}")
+        for roi in box.get("rois", []):
+            shape = f"{len(roi['polygon'])} dinh" if len(roi["polygon"]) >= 3 else "toan khung hinh"
+            print(f"     {roi['roiId'] or '(khong ma)':<10} {shape}")
+        print(f"   da gui {box['sent']} · loi {box['failed']} · ban tin cuoi {last.get('at', '—')} "
+              f"({last.get('people', '—')} nguoi, {last.get('status', '—')})")
+        print(f"   khung hinh: {box['frames']} da nhan" + (f", moi nhat {seen:.0f}s truoc" if isinstance(seen, (int, float)) else ", chua co (mo trang va cho phep camera)"))
+    else:
+        print("  ", box)
 
     path = os.path.join(a.data, "parking.db")
     print("== Trạm", path)

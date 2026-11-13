@@ -239,6 +239,10 @@ namespace DSAVehicle.ParkingCore.Migrations
                     b.Property<bool>("Record24x7")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("RoiPolygon")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("SilentAlertSeconds")
                         .HasColumnType("INTEGER");
 

@@ -3,6 +3,7 @@ import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Radio, Segmente
 import { CarOutlined, CheckCircleFilled, CloseCircleFilled, EditOutlined, EyeOutlined, PlusOutlined, UserOutlined, VideoCameraOutlined, WarningFilled } from '@ant-design/icons'
 import { t } from '../../i18n'
 import { KINDS, PPE_ITEMS, cameraOnline, deviceSilent, formatPpe, hhmm, isDevice, laneKind, laneName, parsePpe, sortLanes } from './laneUtil'
+import RoiEditor from './RoiEditor'
 import './station.css'
 
 // CR-023: lane & camera setup. One lane at a time: readiness, info, cameras, recognition devices,
@@ -25,6 +26,8 @@ export default function LaneSetup({ data, areas, cameras, timings, request, load
   const [form] = Form.useForm(), [camForm] = Form.useForm()
   const [drawer, setDrawer] = useState(null) // { type: 'camera' | 'device', camera? }
   const [wizard, setWizard] = useState(null)
+  // CR-030: the drawn region is kept beside the camera form, not inside it: it is a list of points, not a field.
+  const [roiOpen, setRoiOpen] = useState(false), [roiPolygon, setRoiPolygon] = useState([])
   const lane = lanes.find(l => l.id === selected) || lanes[0]
   const all = cameras?.cameras || []
   const camsOf = l => all.filter(c => c.laneId === l.id && !isDevice(c))
@@ -67,11 +70,14 @@ export default function LaneSetup({ data, areas, cameras, timings, request, load
   function openCamera(type, camera, laneId) {
     camForm.resetFields()
     camForm.setFieldsValue(camera ? { ...camera, source: '', wallSource: '' } : { laneId: laneId || lane?.id, enabled: true, record24x7: type === 'camera', externalChannel: type === 'device' ? '1' : undefined })
+    setRoiPolygon(camera?.roiPolygon || [])
     setDrawer({ type, camera })
   }
   const saveCamera = async () => {
     const v = await camForm.validateFields()
     const body = { ...v, laneId: v.laneId || lane.id, record24x7: drawer.type === 'camera' ? v.record24x7 : false, source: drawer.type === 'camera' ? v.source : '' }
+    // Both a camera and a result-only device (PPE box) can watch a region; [] clears it back to the whole image.
+    body.roiPolygon = roiPolygon
     if (await request('cameras', body, 'put')) { setDrawer(null); loadCameras() }
   }
 
@@ -221,6 +227,10 @@ export default function LaneSetup({ data, areas, cameras, timings, request, load
             <Form.Item name="externalChannel" label={t('Channel (e.g. CH1)')}><Input maxLength={20} /></Form.Item>
             <Form.Item name="externalRoi" label={t('ROI of this lane (PPE camera covering several lanes, e.g. L3)')}><Input maxLength={40} /></Form.Item>
             <Form.Item name="trustedConfidence" label={t('Trusted confidence (empty = always guard review)')}><InputNumber min={0.01} max={1} step={0.01} /></Form.Item></Space>
+          <Space align="center" wrap style={{ marginBottom: 16 }}>
+            <Button icon={<EditOutlined />} onClick={() => setRoiOpen(true)}>{t('Draw region')}</Button>
+            <Typography.Text type="secondary">{roiPolygon.length ? `${roiPolygon.length} ${t('points')}` : t('Whole image')}</Typography.Text>
+          </Space>
         </> : <>
           <Alert style={{ marginBottom: 12 }} type="info" showIcon message={t('Set the Face-S terminal to verify only, so the station decides the opening (and can still stop missing PPE). Faces are enrolled on the terminal; its person ID must match the station list.')} />
           <Space wrap align="start">
@@ -229,10 +239,20 @@ export default function LaneSetup({ data, areas, cameras, timings, request, load
             <Form.Item name="trustedConfidence" label={t('Trusted confidence (empty = always guard review)')}><InputNumber min={0.01} max={1} step={0.01} /></Form.Item>
             <Form.Item name="silentAlertSeconds" label={t('Alert if the AI device is silent for (s, empty = off)')}><InputNumber min={30} max={86400} /></Form.Item></Space>
           <Form.Item name="enabled" label={t('Enabled')} valuePropName="checked"><Switch /></Form.Item>
+          <Typography.Title level={5}>{t('Region watched (PPE AI box only)')}</Typography.Title>
+          <Typography.Text type="secondary">{t('A PPE box reports which region each person stands in. Leave it empty when the box watches this lane alone.')}</Typography.Text>
+          <Space wrap align="start" style={{ marginTop: 8 }}>
+            <Form.Item name="externalRoi" label={t('ROI of this lane (PPE camera covering several lanes, e.g. L3)')}><Input maxLength={40} /></Form.Item></Space>
+          <Space align="center" wrap style={{ marginBottom: 16 }}>
+            <Button icon={<EditOutlined />} onClick={() => setRoiOpen(true)}>{t('Draw region')}</Button>
+            <Typography.Text type="secondary">{roiPolygon.length ? `${roiPolygon.length} ${t('points')}` : t('Whole image')}</Typography.Text>
+          </Space>
           <Typography.Text type="secondary"><VideoCameraOutlined /> {t('No stream and no recording: the device only sends results.')}</Typography.Text>
         </>}
       </Form>
     </Drawer>
+    <RoiEditor open={roiOpen} camera={{ externalDevice: camForm.getFieldValue('externalDevice') }} value={roiPolygon}
+      onCancel={() => setRoiOpen(false)} onSave={polygon => { setRoiPolygon(polygon); setRoiOpen(false) }} />
     {wizardModal()}
   </>
 }

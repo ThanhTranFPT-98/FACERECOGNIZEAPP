@@ -32,6 +32,9 @@ public class Camera
     [MaxLength(20)] public string? ExternalChannel { get; set; }
     // CR-018: one PPE camera may cover several lanes, one ROI per lane. Device + channel + ROI → this row → its lane. Empty = the whole image (one camera ↔ one lane).
     [MaxLength(40)] public string? ExternalRoi { get; set; }
+    // CR-030: the same region as a shape, drawn on the station and fetched by the AI box (GET ai-config).
+    // JSON array of [x, y] in 0-1 of the frame; null or fewer than 3 points means the whole image.
+    [MaxLength(2000)] public string? RoiPolygon { get; set; }
     // Confidence given to this device's results after field evaluation; null = results always go to guard review.
     public double? TrustedConfidence { get; set; }
     public DateTime? LastMessageUtc { get; set; }

@@ -604,6 +604,11 @@ python -m pip install -r AiService/requirements-plate.txt   # + install Tesserac
 # open http://localhost:5173/parking  (user: admin)
 ```
 
+The whole lab in containers (CR-030: station, UI, FaceID terminal, PPE box), from the outer repo:
+```bash
+PLATFORM_KEY=... make lab-up        # then make lab-setup, make lab-diag
+```
+
 Logs: `DSAVehicle/App_Data/parking-api*.log`, `parking-ocr*.log`. Demo flow: `docs/DEPLOYMENT.md` → "Demo flow".
 
 Overview boards without cameras (CR-025): start the API with `Receiver__Key` (32+ characters), then
@@ -624,6 +629,7 @@ python -m unittest discover -s tests -p test_backup.py -v
 python tests/load_test.py --vehicles 40 --lane-gap 5 --bridge-delay 2   # GC-23 load check (Debug build, ~4 min)
 node tests/ui_smoke.mjs                      # UI render check for 4 roles, Vietnamese default (needs ui/node_modules)
 python tests/i18n_check.py                   # every UI text has a Vietnamese entry
+bash tools/ppe-box/run.sh test               # CR-030: PPE AI box (geometry, tracker, ROI, ppe/1 message)
 ```
 
 ### Environment on this machine (checked 2026-09-24)
@@ -767,6 +773,7 @@ Use this section for the customer's new requirements. Write an entry **before** 
 
 | ID | Date | Requested by | Title | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
+| CR-030 | 2026-11-13 | ThanhTranFPT-98 ("xây dựng module PPE chạy trên AI Box; phần mềm tại trạm cần có phần set vùng ROI") | PPE AI box software (`tools/ppe-box/`); the ROI drawn on the station as a shape and fetched by the box (`GET ai-config`); the whole lab — station, UI, FaceID terminal, PPE box — in containers on one laptop | High | Done, tested end to end against the cloud; no real AI box and no trained PPE model yet |
 | CR-029 | 2026-11-11 | ThanhTranFPT-98 ("bảo vệ có quyền mở tay, thiết kế nút mở tay trên các làn") | Guard's manual open on every lane tile, through the station's decision and command chain; no close command | High | Done, tested; not tried on a live barrier |
 | CR-028 | 2026-11-11 | ThanhTranFPT-98 ("xóa tab đang ở trong, tab Lượt & Lệnh barrier") | Remove the *Inside now* and *Passes & barrier commands* screens; shift on duty + shift setup on the overview; reconcile in Alerts; inspection photo and video in the access log drawer | High | Done, tested; not checked in the browser |
 | CR-027 | 2026-11-11 | ThanhTranFPT-98 (sketch `People.png`: FaceID + shift on the left, entry / exit photo with time and PPE on the right) | Cửa lò board: one card per worker visit (face, shift, entry and exit photo, time and PPE); draggable divider between the cards and the 24 h table | High | Done in code, tested; not yet checked in the browser against a restarted API |
@@ -808,6 +815,24 @@ Use this section for the customer's new requirements. Write an entry **before** 
 - **DB migration needed?** no.
 - **Status:** Done.
 - **Result / verification (2026-11-09):** `node tests/ui_smoke.mjs` now renders every screen each role may open (Admin 16, Guard 9, Viewer 8, Technician 12) and checks a refused one; `i18n_check` 0 missing; `vite build` OK. Browser: admin and a guard account against the demo station; `/parking` lands on the overview.
+
+### CR-030 — PPE AI box, the ROI as a drawn region, and the lab in containers
+- **Date / requested by:** 2026-11-13, ThanhTranFPT-98. Run the FaceID simulator, the station and a new PPE module on one laptop, each in its own container, talking to one another as the real boxes do and reporting to the platform on FPT Cloud. The station must offer a way to set the ROI the PPE module recognises in.
+- **Interpretation (what we build):**
+  - `tools/ppe-box/`: the software that will run on the AI box. Browser owns the webcam and posts frames (a container has none), the box detects people, judges the PPE items, tracks them (`trackId`), assigns each person to a region and posts the station's existing `ppe/1` message once a second — a *state report*, never queued: an undelivered one is dropped, because a two minute old picture of a helmet is worse than silence. Three modes (`PPEBOX_MODE`): `face` (SCRFD finds the people, the control panel gives the verdict — real boxes and tracks without anyone wearing a hard hat in the office), `model` (an ONNX detector does both; which class means what is configuration, `PPEBOX_ITEM_CLASSES`, because every public PPE dataset names them differently), `manual` (no camera at all).
+  - `Camera.RoiPolygon` (JSON, `[[x, y], …]` in 0-1 of the frame) beside the existing `ExternalRoi` name. Drawn in Lane settings → camera → **Vẽ vùng ROI** (`ui/src/pages/Parking/RoiEditor.jsx`) on a still fetched from the box (`GET /snapshot`). `PUT cameras` takes 3-20 points; `null` leaves the stored shape alone, `[]` clears it to the whole image.
+  - `GET /api/v1/parking/ai-config?device=&channel=&key=` (`AiConfig.cs`, anonymous, authenticated with the receiver key like the messages coming the other way): the regions of that device. The box asks every 30 s, so a region redrawn on the station takes effect without restarting or logging into the box.
+  - `deploy/docker-compose.lab.yml`: station (`:5085`), UI behind nginx (`:5173`), FaceID simulator (`:8095`), PPE box (`:8096`), one network, `make lab-*` in the outer repo. The station generates its secrets into its data volume on first start; the two devices read the receiver key from a read-only mount of it, so no key is pasted into compose.
+- **Design decision and why; alternatives rejected:**
+  - The region lives on the station, not on the box: at the mine the box has no screen, and the station is already the single place the operator configures anything. A settings page on the box was rejected for that reason.
+  - Who is in a region is decided by the person's **feet**, not the centre of their box: a worker leaning over a lane line is still on their own side.
+  - A `trackId` is never reused and only carried over on a clear overlap. The station re-checks the track before it opens (CR-018), so an id that jumps between people is worse than no id.
+  - The box does not depend on torch: AiService's SCRFD imports it at the top of the file but only uses it in `detect_tracking()`, which is never called, so `vision.py` substitutes an empty module. That keeps ~800 MB out of an image meant for a small box.
+  - The `face` mode exists so a demo never depends on a PPE model trained on a building site behaving in an office. The model mode is the one the mine will run.
+- **Risks / edge cases:** no trained PPE model has been chosen yet (licences of the public ones need checking, and nothing is committed to the repo); the AI box message format from the vendor is still open (Q-B), but both ends are ours, so `ppe/1` stands and a vendor format would be one more adapter. Two AI pipelines on one laptop share the CPU: the box runs 1-2 frames a second, which is enough because the station merges readings over a 10 s window. A malformed or out-of-frame polygon is ignored rather than half-applied, falling back to the whole image.
+- **DB migration needed?** yes — `CameraRoiPolygon` (SQLite) and `CameraRoiPolygonSqlServer`, one nullable column.
+- **Status:** Done.
+- **Result / verification (2026-11-13):** `ParkingCore.Tests` 241 passed (6 new on `CameraRoi`: no shape, two points, malformed, out of frame, rounding on save, point validation); `tools/ppe-box` 21 unit tests (geometry, tracker, region assignment, message shape); `i18n_check` 0 missing; `vite build` and `ui_smoke` OK. End to end on the laptop with all four containers healthy: a region drawn through `PUT cameras` came back from `ai-config` and the running box picked it up; a wrong key got 401; a two point region got 409; the box in `manual` mode reporting a bare head plus a face pass gave `Deny / PPE_MISSING:helmet`, and both events reached the cloud (outbox `Sent`). Not tried: a real AI box, a trained PPE model, and the browser camera page (no screenshot taken).
 
 ### CR-029 — Guard's manual open on each lane
 - **Date / requested by:** 2026-11-11, ThanhTranFPT-98. Not an emergency release: a guard who may operate the lane opens the barrier by hand as a normal action (a recognition failed, a visitor, a priority vehicle…).

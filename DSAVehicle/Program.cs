@@ -108,6 +108,10 @@ namespace DSAVehicle
                 Console.WriteLine($"[Program] Created snapshots directory: {snapshotsPath}");
             }
 
+            // Liveness for the container healthcheck and the lab diagnostics: no data, no auth.
+            // AllowAnonymous because the station's fallback policy demands a signed-in user for everything else.
+            app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+
             app.MapControllers();
 
             app.MapControllerRoute(

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera PPE (AI Box)</title>
+<style>
+:root { --bg:#0b2447; --panel:#12315c; --line:#1d4078; --text:#eaf1fb; --muted:#9db6d8;
+        --ok:#3ecf8e; --bad:#ff6b6b; --warn:#ffc46b; --accent:#4f9dff; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,"Segoe UI",Roboto,sans-serif; }
+.wrap { max-width:1180px; margin:0 auto; padding:18px 16px 60px; }
+h1 { font-size:1.3rem; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:.88rem; margin:0 0 16px; }
+.cols { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr); gap:16px; align-items:start; }
+@media (max-width:900px) { .cols { grid-template-columns:1fr; } }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:16px; }
+.card h2 { font-size:.95rem; margin:0 0 10px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.stage { position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
+.stage video, .stage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+.stage .hint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:20px; color:var(--muted); }
+button { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:#1a3f73; color:var(--text); cursor:pointer; }
+button:hover:not(:disabled) { border-color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#06203f; font-weight:600; }
+.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+.toggle { display:flex; align-items:center; gap:9px; padding:9px 12px; border:1px solid var(--line); border-radius:9px; background:#0f2a52; cursor:pointer; user-select:none; }
+.toggle input { width:17px; height:17px; accent-color:var(--ok); }
+.toggle.off { border-color:#5a2733; background:#2a1420; }
+dl.kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:.88rem; }
+dl.kv dt { color:var(--muted); }
+dl.kv dd { margin:0; word-break:break-word; }
+table { width:100%; border-collapse:collapse; font-size:.84rem; }
+th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+th { color:var(--muted); font-weight:600; }
+.pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:.78rem; }
+.pill.ok { background:rgba(62,207,142,.18); color:var(--ok); }
+.pill.bad { background:rgba(255,107,107,.18); color:var(--bad); }
+.pill.warn { background:rgba(255,196,107,.18); color:var(--warn); }
+code { background:#0d2a52; padding:1px 5px; border-radius:4px; font-size:.86em; }
+.note { font-size:.82rem; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Camera PPE · AI Box giả lập</h1>
+  <p class="sub">Trình duyệt giữ webcam và đẩy khung hình vào AI Box; AI Box nhận diện rồi báo về trạm theo chuẩn <code>ppe/1</code>. Vùng ROI do phần mềm trạm quy định.</p>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2>Khung hình</h2>
+        <div class="stage">
+          <video id="video" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="hint" id="hint">Bấm “Bật camera” và cho phép trình duyệt dùng webcam.</div>
+        </div>
+        <div class="row">
+          <button class="primary" id="start">Bật camera</button>
+          <button id="stop" disabled>Tắt camera</button>
+          <label class="toggle"><input type="checkbox" id="mirror" checked> Lật gương</label>
+          <label class="toggle"><input type="checkbox" id="showRoi" checked> Hiện vùng ROI</label>
+        </div>
+        <p class="note" id="fps"></p>
+      </div>
+
+      <div class="card">
+        <h2>Bản tin gửi về trạm</h2>
+        <table>
+          <thead><tr><th>Lúc</th><th>Vùng</th><th>Người</th><th>Kết quả</th></tr></thead>
+          <tbody id="reports"><tr><td colspan="4" style="color:var(--muted)">Chưa có bản tin nào.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Bảng điều khiển PPE</h2>
+        <p class="note" id="panelWhy"></p>
+        <div class="row" id="items"></div>
+        <div id="manual" style="display:none">
+          <div class="row">
+            <label class="toggle">Số người trong vùng
+              <input type="number" id="people" min="0" max="9" value="1" style="width:56px;background:#0f2a52;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Trạng thái</h2>
+        <dl class="kv" id="status"></dl>
+      </div>
+
+      <div class="card">
+        <h2>Vùng ROI (lấy từ trạm)</h2>
+        <div id="roiList" style="font-size:.86rem;color:var(--muted)">Đang tải…</div>
+        <div class="row"><button id="refreshRoi">Lấy lại từ trạm</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
+let stream = null, busy = false, latest = null, state = null, frames = 0, fpsAt = Date.now();
+
+async function getStatus() {
+  state = await (await fetch('/api/status')).json();
+  renderStatus();
+  renderItems();
+  renderRois(state.rois, state.roiSource, state.roiError);
+}
+
+function renderStatus() {
+  const s = state, last = s.last;
+  const key = s.receiverKeySet ? '<span class="pill ok">đã có</span>' : '<span class="pill bad">chưa đặt</span>';
+  const result = !last ? '—'
+    : last.status === 'sent' ? '<span class="pill ok">trạm đã nhận</span>'
+    : `<span class="pill bad">${last.status}</span> ${last.detail || ''}`;
+  $('status').innerHTML = `
+    <dt>Thiết bị</dt><dd><code>${s.deviceId}</code> · kênh ${s.channel}</dd>
+    <dt>Chế độ</dt><dd>${({face:'face — SCRFD tìm người, PPE do bảng điều khiển',model:'model — mô hình tự nhận PPE',manual:'manual — không dùng camera'})[s.mode] || s.mode}</dd>
+    <dt>Trạm</dt><dd><code>${s.receiver}</code></dd>
+    <dt>Khoá receiver</dt><dd>${key}</dd>
+    <dt>Đã gửi</dt><dd>${s.sent} thành công · ${s.failed} lỗi</dd>
+    <dt>Gần nhất</dt><dd>${result}</dd>`;
+}
+
+function renderItems() {
+  if ($('items').dataset.ready) return;
+  $('items').dataset.ready = '1';
+  $('panelWhy').textContent = state.mode === 'model'
+    ? 'Mô hình tự quyết định; các nút dưới đây không dùng đến.'
+    : 'Mô hình thị giác chỉ thấy có người; bạn quyết định họ đang mang gì — như khi đứng trước camera thật nhưng không có mũ bảo hộ trong phòng.';
+  $('items').innerHTML = state.items.map(item => `
+    <label class="toggle" data-item="${item}">
+      <input type="checkbox" checked data-item="${item}"> ${item === 'helmet' ? 'Mũ bảo hộ' : item === 'vest' ? 'Áo phản quang' : item}
+    </label>`).join('');
+  $('items').querySelectorAll('input').forEach(input => input.addEventListener('change', sendPanel));
+  if (state.mode === 'manual') { $('manual').style.display = 'block'; $('people').addEventListener('change', sendPanel); }
+}
+
+async function sendPanel() {
+  const items = {};
+  $('items').querySelectorAll('input[data-item]').forEach(i => {
+    items[i.dataset.item] = i.checked;
+    i.closest('.toggle').classList.toggle('off', !i.checked);
+  });
+  await fetch('/api/panel', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, people: Number($('people').value || 0) })
+  });
+}
+
+function renderRois(rois, source, error) {
+  const body = (rois || []).map(r => {
+    const where = r.polygon.length >= 3 ? `${r.polygon.length} đỉnh` : 'toàn khung hình';
+    return `<div>• <code>${r.roiId || '(không mã)'}</code> — ${where}${r.label ? ' · ' + r.label : ''}</div>`;
+  }).join('') || '<div>Chưa có vùng nào.</div>';
+  $('roiList').innerHTML = `<div style="margin-bottom:6px">Nguồn: ${source}</div>${body}` +
+    (error ? `<div style="margin-top:6px;color:var(--warn)">${error}</div>` : '');
+}
+
+function renderReports(rows) {
+  if (!rows.length) return;
+  $('reports').innerHTML = rows.slice(0, 12).map(r => `
+    <tr><td>${(r.at || '').replace('T', ' ').replace('Z', '')}</td><td>${r.rois}</td><td>${r.people}</td>
+    <td>${r.status === 'sent' ? '<span class="pill ok">đã nhận</span>' : `<span class="pill bad">${r.status}</span> ${r.detail || ''}`}</td></tr>`).join('');
+}
+
+function draw() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return;
+  if (overlay.width !== w) { overlay.width = w; overlay.height = h; }
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  if ($('mirror').checked) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+
+  if ($('showRoi').checked && latest) {
+    ctx.strokeStyle = '#4f9dff'; ctx.lineWidth = Math.max(2, w / 400); ctx.setLineDash([10, 8]);
+    for (const roi of latest.rois || []) {
+      if (roi.polygon.length < 3) continue;
+      ctx.beginPath();
+      roi.polygon.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h));
+      ctx.closePath(); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  for (const person of (latest ? latest.people : [])) {
+    const [x, y, bw, bh] = person.box;
+    const values = Object.values(person.items);
+    const bad = values.some(v => v === false);
+    ctx.strokeStyle = bad ? '#ff6b6b' : values.length ? '#3ecf8e' : '#ffc46b';
+    ctx.lineWidth = Math.max(2, w / 300);
+    ctx.strokeRect(x * w, y * h, bw * w, bh * h);
+    const chips = Object.entries(person.items).map(([k, v]) => `${k} ${v ? '✓' : '✗'}`).join('  ');
+    const label = `${person.trackId}${person.roiId ? ' · ' + person.roiId : ' · ngoài vùng'}  ${chips}`;
+    ctx.font = `${Math.max(14, w / 48)}px system-ui`;
+    const pad = 6, tw = ctx.measureText(label).width + pad * 2, th = Math.max(20, w / 36);
+    ctx.fillStyle = 'rgba(11,36,71,.85)';
+    ctx.fillRect(x * w, Math.max(0, y * h - th), tw, th);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.save(); if ($('mirror').checked) { ctx.translate(x * w + tw, 0); ctx.scale(-1, 1); ctx.translate(-(x * w), 0); }
+    ctx.fillText(label, x * w + pad, Math.max(th - pad, y * h - pad));
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+async function pump() {
+  if (!stream) return;
+  if (!busy && video.videoWidth) {
+    busy = true;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+      const response = await fetch('/api/frame', { method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg' } });
+      if (response.ok) {
+        latest = await response.json();
+        frames++;
+        if (latest.report) renderReports([latest.report]);
+      }
+    } catch (e) { /* the next frame tries again */ }
+    busy = false;
+  }
+  draw();
+  requestAnimationFrame(pump);
+}
+
+$('start').addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 720 } } });
+  } catch (e) { $('hint').textContent = 'Không mở được camera: ' + e.message; return; }
+  video.srcObject = stream; await video.play();
+  $('hint').style.display = 'none'; $('start').disabled = true; $('stop').disabled = false;
+  pump();
+});
+
+$('stop').addEventListener('click', () => {
+  stream.getTracks().forEach(t => t.stop()); stream = null; latest = null;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  $('hint').style.display = 'flex'; $('start').disabled = false; $('stop').disabled = true;
+});
+
+$('refreshRoi').addEventListener('click', async () => {
+  const data = await (await fetch('/api/rois/refresh', { method: 'POST' })).json();
+  renderRois(data.rois, data.source, data.error);
+});
+
+setInterval(async () => {
+  await getStatus();
+  renderReports(await (await fetch('/api/reports')).json());
+  const seconds = (Date.now() - fpsAt) / 1000;
+  $('fps').textContent = stream ? `${(frames / seconds).toFixed(1)} khung hình/giây gửi vào AI Box` : '';
+  frames = 0; fpsAt = Date.now();
+}, 3000);
+
+getStatus();
+</script>
+</body>
+</html>

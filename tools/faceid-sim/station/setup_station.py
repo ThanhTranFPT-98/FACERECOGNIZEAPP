@@ -1,8 +1,9 @@
 """
 Configures a running station for the face-ID demo through its own admin API (same calls as the UI):
   1. device profile  faceid-sim      (how to read the simulator's messages)
-  2. lane            PED-IN           (pedestrian entry, FaceOnly, simulated barrier, auto-open)
+  2. lane            PED-IN           (pedestrian entry, FaceOnly, simulated barrier, auto-open, PPE rule)
   3. camera          FACESIM-01       (the simulator, bound to the lane)
+  4. camera          PPEBOX-01        (the PPE AI box, same lane; --no-ppe leaves it out)
 Safe to run again: every call is an upsert.
 
   STATION_PASSWORD=... python station/setup_station.py --station http://localhost:5085
@@ -57,6 +58,14 @@ def main():
     p.add_argument("--face-threshold", type=float, default=0.55)
     # The station never trusts a device more than this; 1.0 = take the reported score as is (demo only, not evaluated on site).
     p.add_argument("--trusted", type=float, default=1.0)
+    # CR-030: the PPE AI box watching the same lane. An empty ROI id means it watches the whole frame.
+    p.add_argument("--ppe-device", default=os.environ.get("PPEBOX_DEVICE_ID", "PPEBOX-01"))
+    p.add_argument("--ppe-channel", default="1")
+    p.add_argument("--ppe-roi", default=os.environ.get("PPEBOX_ROI", ""))
+    p.add_argument("--ppe-rules", default="helmet=required,vest=warn")
+    # What to do when the box said nothing about the person at the gate: Review sends them to the guard.
+    p.add_argument("--ppe-missing", default="Review", choices=["Review", "Deny", "AllowAlert"])
+    p.add_argument("--no-ppe", action="store_true", help="skip the PPE camera and leave the lane's PPE rule alone")
     args = p.parse_args()
     password = os.environ.get("STATION_PASSWORD") or sys.exit("Set STATION_PASSWORD (the station admin password).")
 
@@ -70,16 +79,30 @@ def main():
         "sample": json.dumps(SAMPLE, ensure_ascii=False)})
     print(f"  profile {profile['id']} v{profile['version']}")
 
-    station.put("/api/v1/parking/lanes", {
-        "id": args.lane, "direction": "Entry", "subject": "Person", "policy": "FaceOnly", "faceThreshold": args.face_threshold,
-        "shadowMode": False, "simulation": True, "autoOpen": True})
+    lane = {"id": args.lane, "direction": "Entry", "subject": "Person", "policy": "FaceOnly", "faceThreshold": args.face_threshold,
+            "shadowMode": False, "simulation": True, "autoOpen": True}
+    if not args.no_ppe:
+        lane |= {"ppeRules": args.ppe_rules, "ppeMissingMode": args.ppe_missing}
+    station.put("/api/v1/parking/lanes", lane)
     print(f"  lane {args.lane}: pedestrian entry, FaceOnly >= {args.face_threshold}, simulated barrier, auto-open")
+    if not args.no_ppe:
+        print(f"           PPE: {args.ppe_rules} (no reading -> {args.ppe_missing})")
 
     station.put("/api/v1/parking/cameras", {
         "id": args.device, "name": "FaceID Simulator", "laneId": args.lane, "enabled": True, "record24x7": False,
         "externalDevice": args.device, "externalChannel": args.channel, "trustedConfidence": args.trusted, "silentAlertSeconds": 120})
     print(f"  camera {args.device} (channel {args.channel}) -> {args.lane}, trusted confidence {args.trusted}")
+    if not args.no_ppe:
+        # The PPE box has no stream to record: it is a result-only device, like the face terminal.
+        station.put("/api/v1/parking/cameras", {
+            "id": args.ppe_device, "name": "PPE AI Box", "laneId": args.lane, "enabled": True, "record24x7": False,
+            "externalDevice": args.ppe_device, "externalChannel": args.ppe_channel, "externalRoi": args.ppe_roi,
+            "silentAlertSeconds": 120})
+        where = f"ROI {args.ppe_roi}" if args.ppe_roi else "whole image"
+        print(f"  camera {args.ppe_device} (channel {args.ppe_channel}, {where}) -> {args.lane}")
     print(f"\nSimulator target: {station.url}/api/v1/parking/receiver/{args.profile}?key=<Receiver:Key>")
+    if not args.no_ppe:
+        print(f"PPE box target  : {station.url}/api/v1/parking/receiver/ppe?key=<Receiver:Key>")
 
 
 if __name__ == "__main__":

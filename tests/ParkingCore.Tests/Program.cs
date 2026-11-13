@@ -416,6 +416,17 @@ finally { try { sandbox.Delete(true); } catch (IOException) { } }
     Check(!PpeRules.SameTrack([T(10, "a", true)], "a", t0, window) && !PpeRules.SameTrack([], "a", t0, window), "The PPE camera went quiet beyond the window → the track is lost");
 }
 
+// ---- CR-030: the ROI as a shape, drawn on the station and fetched by the AI box ----
+{
+    Check(CameraRoi.Parse(null) is null && CameraRoi.Parse("") is null, "No stored shape means the whole image");
+    Check(CameraRoi.Parse("[[0.1,0.1],[0.9,0.1]]") is null, "Two points are not a region: the whole image is used instead of half a shape");
+    Check(CameraRoi.Parse("not json") is null && CameraRoi.Parse("[[0.1,2.0],[0.2,0.2],[0.3,0.3]]") is null, "A malformed or out-of-frame shape is ignored, never half-applied");
+    var square = CameraRoi.Parse("[[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]");
+    Check(square is { Length: 4 } && square[2][0] == 0.9, "A valid shape comes back as points in 0-1 of the frame");
+    Check(CameraRoi.Serialize([[0.123456, 0.5], [0, 1], [1, 0]]) == "[[0.1235,0.5],[0,1],[1,0]]", "Points are stored rounded: a quarter of a pixel is not configuration");
+    Check(!CameraRoi.Valid([0.5]) && !CameraRoi.Valid([0.5, 1.5]) && CameraRoi.Valid([0, 1]), "A point is two numbers inside the frame");
+}
+
 // CR-018 through ParkingService: the decision is made for track "a"; the automatic opening checks that "a" is still the person in the ROI.
 {
     using var trackConnection = new SqliteConnection("Data Source=:memory:");

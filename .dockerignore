@@ -1,0 +1,12 @@
+# Keep the build context small: sources only, no build output, no models, no local data.
+**/bin/
+**/obj/
+**/node_modules/
+**/App_Data/
+**/.vs/
+**/.git/
+AiService/
+Notes/
+docs/
+tests/
+*.md

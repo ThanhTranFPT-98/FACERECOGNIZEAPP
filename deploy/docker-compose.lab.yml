@@ -1,0 +1,86 @@
+# Lab on one laptop: the station, its UI, the FaceID terminal and the PPE AI box, each in its own
+# container, talking to one another exactly as the real boxes do over the site network, and reporting
+# to the platform on FPT Cloud. Run it from the repo root of DSA_Vehicles:
+#   docker compose -f deploy/docker-compose.lab.yml up -d --build
+# The webcam stays with the browser on Windows (a container cannot see it); the browser posts frames in.
+name: dsa-lab
+
+services:
+  station:
+    build:
+      context: ..
+      dockerfile: deploy/station.Dockerfile
+    image: dsa-station:lab
+    container_name: dsa-station
+    restart: unless-stopped
+    environment:
+      STATION_ID: ${STATION_ID:-CUALO-GC}
+      CLOUD_URL: ${CLOUD_URL:-https://85-155-21-148.sslip.io}
+      # Issued by the cloud dashboard (Trạm → Đổi khoá). Leave empty to run the lab offline.
+      PLATFORM_KEY: ${PLATFORM_KEY:-}
+    volumes:
+      - station-data:/data
+    ports:
+      - "5085:5085"
+
+  ui:
+    build:
+      context: ..
+      dockerfile: deploy/ui.Dockerfile
+    image: dsa-station-ui:lab
+    container_name: dsa-station-ui
+    restart: unless-stopped
+    depends_on:
+      - station
+    ports:
+      - "5173:80"
+
+  faceid-sim:
+    build:
+      context: ..
+      dockerfile: tools/faceid-sim/Dockerfile
+    image: dsa-faceid-sim:lab
+    container_name: dsa-faceid-sim
+    restart: unless-stopped
+    depends_on:
+      station:
+        condition: service_healthy
+    environment:
+      FACESIM_STATION_URL: http://station:5085
+      FACESIM_DEVICE_ID: ${FACESIM_DEVICE_ID:-FACESIM-01}
+      FACESIM_PROFILE: faceid-sim
+    volumes:
+      # Model code and weights live in the repo, not in the image.
+      - ../AiService:/app/AiService:ro
+      # Read-only view of the station's data, for the receiver key alone.
+      - station-data:/station-data:ro
+      - faceid-data:/data
+    ports:
+      - "8095:8095"
+
+  ppe-box:
+    build:
+      context: ..
+      dockerfile: tools/ppe-box/Dockerfile
+    image: dsa-ppe-box:lab
+    container_name: dsa-ppe-box
+    restart: unless-stopped
+    depends_on:
+      station:
+        condition: service_healthy
+    environment:
+      PPEBOX_STATION_URL: http://station:5085
+      PPEBOX_DEVICE_ID: ${PPEBOX_DEVICE_ID:-PPEBOX-01}
+      # face: SCRFD finds the people, the control panel says what they wear (see tools/ppe-box/README.md).
+      PPEBOX_MODE: ${PPEBOX_MODE:-face}
+      PPEBOX_MODEL: ${PPEBOX_MODEL:-}
+      PPEBOX_ITEMS: ${PPEBOX_ITEMS:-helmet,vest}
+    volumes:
+      - ../AiService:/app/AiService:ro
+      - station-data:/station-data:ro
+    ports:
+      - "8096:8096"
+
+volumes:
+  station-data:
+  faceid-data:

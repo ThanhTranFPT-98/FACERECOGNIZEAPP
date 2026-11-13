@@ -13,9 +13,7 @@ public class ReceiverController(InboxWriter inbox, IConfiguration config) : Cont
     [HttpPost("api/v1/parking/receiver/{adapter}"), RequestSizeLimit(16_000_000)]
     public async Task<IActionResult> Receive(string adapter, [FromQuery] string? key)
     {
-        var options = ReceiverOptions.From(config);
-        if (string.IsNullOrEmpty(options.Key) || options.Key.Length < 32 || key is null
-            || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(options.Key)), SHA256.HashData(Encoding.UTF8.GetBytes(key)))) return Unauthorized();
+        if (!ReceiverOptions.From(config).KeyMatches(key)) return Unauthorized();
         return await Store(adapter);
     }
 

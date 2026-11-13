@@ -246,6 +246,10 @@ namespace DSAVehicle.ParkingCore.SqlServerMigrations
                     b.Property<bool>("Record24x7")
                         .HasColumnType("bit");
 
+                    b.Property<string>("RoiPolygon")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<int?>("SilentAlertSeconds")
                         .HasColumnType("int");
 
