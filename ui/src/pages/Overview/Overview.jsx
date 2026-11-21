@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Dropdown, Empty, Form, Input, Modal, Segmented, Select, Space, Switch, Table, Tag, Tooltip, message } from 'antd'
-import { CarOutlined, PlusOutlined, UnlockOutlined, UserOutlined } from '@ant-design/icons'
+import { CarOutlined, DesktopOutlined, PlusOutlined } from '@ant-design/icons'
 import * as signalR from '@microsoft/signalr'
 import api from '../../services/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n'
 import { laneKind, laneName, sortLanes, PPE_ITEMS, parsePpe, hhmm } from '../Parking/laneUtil'
+import ManualOpen from '../Parking/ManualOpen'
 import './overview.css'
 
 // CR-025: the station overview is the two hand-drawn boards (outer repo Planning/BaoCao_GiaoDien_anh/draw, mockup v4):
@@ -53,16 +54,19 @@ export default function Overview() {
   }
   if (!data) return error ? <Alert type="error" showIcon message={t(error)} /> : <div className="ovLoading">{t('Loading…')}</div>
   const lanes = sortLanes(data.lanes)
-  const name = id => people[id]?.name || (id ? t('Person') + ' ' + id : '—')
   return <div className="ov">
     <div className="ovHead">
       <h1>{t('Dashboard')}</h1>
-      <Segmented value={view} onChange={choose} options={[{ value: 'mine', label: t('Mine gate (FaceID + PPE)') }, { value: 'vehicles', label: t('Vehicles in / out') }]} />
+      <Space wrap>
+        {view === 'vehicles' && can('OperateLane') && <VehicleOpenBar lanes={lanes.filter(l => laneKind(l) !== 'Person')} events={data.events} act={act} />}
+        {view === 'mine' && can('ManageSite') && <BoardLink />}
+        <Segmented value={view} onChange={choose} options={[{ value: 'mine', label: t('Mine gate (FaceID + PPE)') }, { value: 'vehicles', label: t('Vehicles in / out') }]} />
+      </Space>
     </div>
     {error && <Alert type="warning" showIcon message={t(error)} style={{ marginBottom: 12 }} />}
     {view === 'mine'
       ? <MineBoard lanes={lanes.filter(l => laneKind(l) === 'Person')} events={data.events} visits={visits.filter(v => v.subjectKey.startsWith('P:'))} people={people} photos={can('ViewEvidence')} can={can} act={act} />
-      : <LaneWall lanes={lanes.filter(l => laneKind(l) !== 'Person')} data={data} name={name} can={can} act={act} />}
+      : <VehicleBoard lanes={lanes.filter(l => laneKind(l) !== 'Person')} data={data} visits={visits.filter(v => v.subjectKey.startsWith('V:'))} people={people} can={can} act={act} />}
   </div>
 }
 
@@ -81,9 +85,11 @@ function FaceBox({ personId, name, code }) {
 }
 
 // The overview photo the gate camera sent with that passage (= the event's evidence on a person lane).
-function Photo({ eventId, has, allowed, label }) {
+// The public board (CR-031) passes its own address, which carries the board key instead of a session.
+const evidenceSrc = id => '/api' + base + '/events/' + id + '/evidence'
+function Photo({ eventId, has, allowed, label, photoSrc = evidenceSrc }) {
   const [broken, setBroken] = useState(false)
-  const src = '/api' + base + '/events/' + eventId + '/evidence'
+  const src = photoSrc(eventId)
   return <div className="photo">
     {eventId && has && allowed && !broken
       ? <a href={src} target="_blank" rel="noreferrer"><img alt={label} loading="lazy" src={src} onError={() => setBroken(true)} /></a>
@@ -93,9 +99,9 @@ function Photo({ eventId, has, allowed, label }) {
 }
 
 // One half of a card: photo | time over PPE (sketch People.png).
-function Leg({ label, eventId, has, allowed, time, ppe, classes, pending }) {
+function Leg({ label, eventId, has, allowed, time, ppe, classes, pending, photoSrc }) {
   return <div className="leg">
-    <Photo eventId={eventId} has={has} allowed={allowed} label={label} />
+    <Photo eventId={eventId} has={has} allowed={allowed} label={label} photoSrc={photoSrc} />
     <div className="time">{pending ? <Tag color="gold">{t('Not out yet')}</Tag> : time}</div>
     <div className="ppe">{!pending && (ppe === undefined ? <span className="muted">—</span> : <PpeChips classes={classes} items={ppeItems(ppe)} />)}</div>
   </div>
@@ -122,12 +128,15 @@ function useSplit(box) {
   return [width, handle]
 }
 
-function MineBoard({ lanes, events, visits, people, photos, can, act }) {
+// Also the public board outside the mine door (CR-031, pages/Display/Board.jsx): there `can` refuses everything,
+// `fixed` brings the shifts and areas with the board's own data, and `photoSrc` adds the board key to the photo address.
+export function MineBoard({ lanes, events, visits, people, photos, can, act, fixed, photoSrc }) {
   const box = useRef(null)
   const [split, handle] = useSplit(box)
-  const [shifts, setShifts] = useState([]), [areas, setAreas] = useState([]), [editShifts, setEditShifts] = useState(false)
-  const loadShifts = async () => { try { const [s, a] = await Promise.all([api.get(base + '/shifts'), api.get(base + '/areas')]); setShifts(s.data); setAreas(a.data) } catch { /* the tile shows "No shift" */ } }
-  useEffect(() => { loadShifts() }, [])
+  const [loaded, setLoaded] = useState({ shifts: [], areas: [] }), [editShifts, setEditShifts] = useState(false)
+  const { shifts, areas } = fixed || loaded
+  const loadShifts = async () => { try { const [s, a] = await Promise.all([api.get(base + '/shifts'), api.get(base + '/areas')]); setLoaded({ shifts: s.data, areas: a.data }) } catch { /* the tile shows "No shift" */ } }
+  useEffect(() => { if (!fixed) loadShifts() }, [])
   // CR-028: the shift on duty now at the areas of the mine gate lanes (station clock = this PC's clock).
   const gateAreas = new Set(areas.filter(a => a.locations.some(l => l.lanes.some(id => lanes.some(x => x.id === id)))).map(a => a.id))
   const onDuty = shifts.filter(s => (!gateAreas.size || gateAreas.has(s.areaId)) && shiftCovers(s, new Date()))
@@ -172,8 +181,8 @@ function MineBoard({ lanes, events, visits, people, photos, can, act }) {
               <div className="shift">{v.shift || t('No shift')}</div>
             </div>
             <div className="legs">
-              <Leg label={t('Entry')} eventId={v.inEventId} has={v.inPhoto} allowed={photos} time={hhmm(v.inUtc)} ppe={v.ppeSummary ?? undefined} classes={classes} />
-              <Leg label={t('Exit')} eventId={v.outEventId} has={v.outPhoto} allowed={photos} time={v.outUtc && hhmm(v.outUtc)} ppe={v.outEventId ? v.outPpeSummary ?? undefined : undefined} classes={classes} pending={!v.outUtc} />
+              <Leg label={t('Entry')} eventId={v.inEventId} has={v.inPhoto} allowed={photos} time={hhmm(v.inUtc)} ppe={v.ppeSummary ?? undefined} classes={classes} photoSrc={photoSrc} />
+              <Leg label={t('Exit')} eventId={v.outEventId} has={v.outPhoto} allowed={photos} time={v.outUtc && hhmm(v.outUtc)} ppe={v.outEventId ? v.outPpeSummary ?? undefined : undefined} classes={classes} pending={!v.outUtc} photoSrc={photoSrc} />
             </div>
           </article>)}
           {!visits.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('Nobody has passed yet')} />}
@@ -193,7 +202,7 @@ function MineBoard({ lanes, events, visits, people, photos, can, act }) {
         </table>{!rows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('No entries in the last 24 h')} />}</div>
       </section>
     </div>
-    <ShiftEditor open={editShifts} onClose={() => setEditShifts(false)} shifts={shifts} areas={areas} reload={loadShifts} />
+    {!fixed && <ShiftEditor open={editShifts} onClose={() => setEditShifts(false)} shifts={shifts} areas={areas} reload={loadShifts} />}
   </>
 }
 
@@ -202,6 +211,39 @@ const minutes = hm => { const [h, m] = (hm || '').split(':').map(Number); return
 function shiftCovers(s, now) {
   const m = now.getHours() * 60 + now.getMinutes(), start = minutes(s.start), end = minutes(s.end)
   return start <= end ? m >= start && m < end : m >= start || m < end
+}
+
+// CR-031: the screen outside the mine door shows this board read-only at /board?key=… (no account on the TV).
+// One key per station; a new key disconnects the old address, "Turn off" stops the board. ManageSite only.
+function BoardLink() {
+  const [open, setOpen] = useState(false), [link, setLink] = useState(null), [busy, setBusy] = useState(false)
+  const call = async (method, path) => {
+    setBusy(true)
+    try { setLink((await api.request({ method, url: base + '/board/' + path })).data) }
+    catch (e) { message.error(t(e.response?.data?.message || 'Request failed')) }
+    finally { setBusy(false) }
+  }
+  const show = () => { setOpen(true); call('get', 'link') }
+  const url = link?.key ? window.location.origin + '/board?key=' + link.key : null
+  const copy = async () => { try { await navigator.clipboard.writeText(url); message.success(t('Copied')) } catch { message.info(url) } }
+  return <>
+    <Button icon={<DesktopOutlined />} onClick={show}>{t('Show on the outside screen')}</Button>
+    <Modal open={open} onCancel={() => setOpen(false)} footer={null} width={640} title={t('Mine gate board on the outside screen')}>
+      <Space direction="vertical" style={{ width: '100%' }}>
+        <Alert type="warning" showIcon message={t('Anyone who has this address sees the board: names, worker codes and entry / exit photos of the last 24 h. Give it only to the screen outside the mine door.')} />
+        {url ? <>
+          <Input readOnly value={url} addonAfter={<a onClick={copy}>{t('Copy')}</a>} />
+          <div className="muted">{link.lastSeenUtc ? t('Screen last seen') + ': ' + hhmm(link.lastSeenUtc) + (link.lastSeenIp ? ' · ' + link.lastSeenIp : '') : t('No screen has opened it yet')}</div>
+          <div>{t('On the TV PC, start Chrome full screen:')}</div>
+          <Input.TextArea readOnly autoSize value={'chrome.exe --kiosk --autoplay-policy=no-user-gesture-required "' + url + '"'} />
+        </> : <div>{t('The outside screen is off. Create an address to turn it on.')}</div>}
+        <Space wrap>
+          <Button type="primary" loading={busy} onClick={() => call('post', 'rekey')}>{url ? t('New address (disconnects the old one)') : t('Create address')}</Button>
+          {url && <Button danger loading={busy} onClick={() => call('delete', 'key')}>{t('Turn off')}</Button>}
+        </Space>
+      </Space>
+    </Modal>
+  </>
 }
 
 // CR-028: shift setup, moved here from the removed "Inside now" screen. ManageSite only; refused by the server while the cloud owns the list.
@@ -227,130 +269,151 @@ function ShiftEditor({ open, onClose, shifts, areas, reload }) {
   </Modal>
 }
 
-// CR-029: a guard opens the lane by hand. The station stores it as the guard's decision and sends the same Open command as any pass,
-// so every safety gate still applies (shadow mode, sensors, arm closed, no unresolved command). There is no close: the controller
-// lowers the arm itself when its sensors allow.
-const MANUAL_REASONS = [['RECOGNITION_FAILED', 'Recognition failed'], ['VISITOR', 'Visitor'], ['PRIORITY_VEHICLE', 'Priority vehicle'], ['OTHER', 'Other']]
-function ManualOpen({ lane, last, people, act, label }) {
-  const [open, setOpen] = useState(null), [busy, setBusy] = useState(false)
-  const [form] = Form.useForm()
-  const person = laneKind(lane) === 'Person'
-  const reason = Form.useWatch('reason', form)
-  // Pre-filled from the lane's last pass; the form is created fresh each time the dialog opens (destroyOnClose).
-  const start = () => setOpen({ reason: 'RECOGNITION_FAILED', note: '', plate: person ? undefined : last?.plate || '', personId: person ? last?.personId ?? undefined : undefined })
-  const send = async v => {
-    setBusy(true)
-    const ok = await act(`lanes/${lane.id}/manual-open`, { reason: v.reason, note: v.note?.trim() || null, plate: v.plate?.trim() || null, personId: v.personId ?? null })
-    setBusy(false)
-    if (ok) { message.success(t('Barrier opened by hand')); setOpen(null) }
-  }
-  return <>
-    <Button size="small" icon={<UnlockOutlined />} onClick={start}>{label}</Button>
-    <Modal open={!!open} title={t('Manual open') + ' · ' + laneName(lane)} okText={t('Open barrier')} confirmLoading={busy} onCancel={() => setOpen(null)} onOk={() => form.submit()} destroyOnClose>
-      {open && <Form form={form} layout="vertical" initialValues={open} onFinish={send}>
-        <Form.Item name="reason" label={t('Reason')}><Segmented block options={MANUAL_REASONS.map(([value, text]) => ({ value, label: t(text) }))} /></Form.Item>
-        <Form.Item name="note" label={t('Note')} rules={reason === 'OTHER' ? [{ required: true, min: 3, whitespace: true, message: t('Reason (at least 3 characters)') }] : []}>
-          <Input.TextArea rows={2} maxLength={500} placeholder={reason === 'OTHER' ? t('Reason (at least 3 characters)') : t('Optional')} /></Form.Item>
-        {person
-          ? <Form.Item name="personId" label={t('Who is passing (counted inside / out)')}><Select allowClear showSearch optionFilterProp="label" placeholder={t('Nobody named')}
-              options={Object.values(people || {}).map(p => ({ value: p.personId, label: p.name + (p.code ? ' · ' + p.code : '') }))} /></Form.Item>
-          : <Form.Item name="plate" label={t('Plate (for the parking session)')}><Input maxLength={24} placeholder="30A-123.45" /></Form.Item>}
-        <Alert type="info" showIcon message={t('The barrier opens only if the lane is safe: sensors healthy, arm closed, no pending command. It closes by itself after the passage.')} />
-      </Form>}
-    </Modal>
-  </>
+// CR-032 (17/11/2026): "Xe ra vào" drawn as UI/v2_2026-11-16/UI_PMTramBaoVe_UB.png (mockup 04-station-vehicles.html).
+// Shift on duty in the middle; 4 counters (motorbike in / out, car in / out) = vehicles that really went through today
+// (passages/today); then one frame per vehicle kind with the newest vehicle: its entry and its own exit, each with the
+// plate photo (the event's evidence) and the overview photo (the event's "Overview" image). Lane switches: one row per lane
+// in the frame's top-right corner. Approve / Reject show in the frame when the newest vehicle waits for the guard.
+// Manual open: one button per lane at the top right of the page (VehicleOpenBar). The lane feed lives in Reports & audit,
+// Add lane in Lane settings. The mine gate board above is unchanged.
+function VehicleOpenBar({ lanes, events, act }) {
+  return <div className="ovOpen">{lanes.map(l => <ManualOpen key={l.id} lane={l} last={events.find(e => e.laneId === l.id)} act={act} size="large"
+    label={<span className="lbl"><b>{t('Manual open')}</b><small>{laneName(l)}</small></span>} />)}</div>
 }
 
-function LaneWall({ lanes, data, name, can, act }) {
-  const [filter, setFilter] = useState('all'), [focus, setFocus] = useState(null), [detail, setDetail] = useState(null)
-  const [review, setReview] = useState(null), [note, setNote] = useState(''), [adding, setAdding] = useState(false)
-  const [form] = Form.useForm()
-  // A pass waiting for the guard stays on its tile even when later vehicles pass: it must not scroll away unseen.
-  const latest = useMemo(() => Object.fromEntries(lanes.map(l => [l.id, data.events.find(e => e.laneId === l.id && pendingReview(e, l)) || data.events.find(e => e.laneId === l.id)])), [lanes, data.events])
+function VehicleBoard({ lanes, data, visits, people, can, act }) {
+  const [shifts, setShifts] = useState([]), [areas, setAreas] = useState([]), [counts, setCounts] = useState(null)
+  const [review, setReview] = useState(null), [note, setNote] = useState('')
+  useEffect(() => {
+    api.get(base + '/shifts').then(r => setShifts(r.data)).catch(() => {})
+    api.get(base + '/areas').then(r => setAreas(r.data)).catch(() => {})
+    const load = () => api.get(base + '/passages/today').then(r => setCounts(Object.fromEntries(r.data.map(x => [x.laneId, x.count])))).catch(() => setCounts(null))
+    load(); const timer = setInterval(load, 10000)
+    return () => clearInterval(timer)
+  }, [])
+  // Same rule as the mine gate tile: the shift on duty now at the areas of these lanes (station clock).
+  const laneAreas = new Set(areas.filter(a => a.locations.some(l => l.lanes.some(id => lanes.some(x => x.id === id)))).map(a => a.id))
+  const onDuty = shifts.filter(s => (!laneAreas.size || laneAreas.has(s.areaId)) && shiftCovers(s, new Date()))
+  const count = (kind, direction) => counts ? lanes.filter(l => laneKind(l) === kind && l.direction === direction).reduce((n, l) => n + (counts[l.id] || 0), 0) : null
   const vehicles = Object.fromEntries(data.vehicles.map(v => [v.normalizedPlate, v]))
-  const opened = new Set(data.commands.map(c => c.eventId))
-  const laneIds = new Set(lanes.map(l => l.id))
-  const feed = data.events.filter(e => laneIds.has(e.laneId))
-  const visible = lanes.filter(l => filter === 'all' || laneKind(l) === filter)
-  const operate = can('OperateLane')
-  // Both: the face must belong to the vehicle (owner or an authorised rider), as AccessPolicy checks.
-  const matches = (e, v) => v && e.personId && (v.personId === e.personId || (v.authorizedPeople || []).some(p => p.personId === e.personId))
-  const show = e => { setFocus(e.laneId); setDetail(e); document.getElementById('lane-' + e.laneId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
-  const addLane = async values => {
-    const ok = await act('lanes', { ...values, policy: values.kind === 'Motorbike' ? 'Both' : 'PlateOnly', subject: 'Vehicle', plateThreshold: .95, faceThreshold: .8, shadowMode: true, simulation: true }, 'put')
-    if (ok) { message.success(t('Saved')); setAdding(false); form.resetFields() }
-  }
-  const count = kind => lanes.filter(l => laneKind(l) === kind).length
+  const name = id => people[id]?.name || (id ? t('Person') + ' ' + id : '—')
+  const frame =(kind, title, icon) => <VehicleFrame kind={kind} title={title} icon={icon} lanes={lanes.filter(l => laneKind(l) === kind)} data={data}
+    visits={visits} vehicles={vehicles} name={name} can={can} act={act} onReview={(event, approve) => { setReview({ event, approve }); setNote('') }} />
+  if (!lanes.length) return <Empty description={t('No vehicle lane yet. Add one in Lane settings, or run scripts/demo_station.py for a demo.')} />
   return <>
-    <div className="ovBar">
-      <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: t('All') + ' ' + lanes.length }, { value: 'Car', label: t('Car') + ' ' + count('Car') }, { value: 'Motorbike', label: t('Motorbike') + ' ' + count('Motorbike') }]} />
-      <span className="spacer" />
-      {can('ManageSite') && <Button icon={<PlusOutlined />} onClick={() => setAdding(true)}>{t('Add lane')}</Button>}
+    <div className="vbStats">
+      <div className="vbShift"><span>{t('Shift on duty')}</span>
+        <strong>{onDuty.length ? [...new Set(onDuty.map(s => s.name))].join(', ') : '—'}</strong>
+        <small>{onDuty.length ? onDuty[0].start + '–' + onDuty[0].end : t('No shift')}</small></div>
+      <div className="vbCounts">
+        <Count icon="🏍" label={t('Motorbikes in')} value={count('Motorbike', 'Entry')} />
+        <Count icon="🏍" label={t('Motorbikes out')} value={count('Motorbike', 'Exit')} />
+        <i className="gap" />
+        <Count icon={<CarOutlined />} label={t('Cars in')} value={count('Car', 'Entry')} />
+        <Count icon={<CarOutlined />} label={t('Cars out')} value={count('Car', 'Exit')} />
+      </div>
+      <small className="vbNote">{t('Vehicles that went through today (since 00:00)')}</small>
     </div>
-    {!lanes.length && <Empty description={t('No vehicle lane yet. Add one, or run scripts/demo_station.py for a demo.')} />}
-    <div className="ovWall">
-      <div className="ovLanes">{visible.map(l => {
-        const e = latest[l.id], v = e && vehicles[e.plate], moto = laneKind(l) === 'Motorbike'
-        return <article key={l.id} id={'lane-' + l.id} className={'ovLane ' + (focus === l.id ? 'focus ' : '') + (e ? outcomeColor(e.outcome) : 'idle')}>
-          <header>
-            {moto ? <span className="kind">🏍</span> : <CarOutlined className="kind" />}
-            <strong>{laneName(l)}</strong><Tag>{t(l.direction)}</Tag>
-            <Tag color={l.shadowMode ? 'default' : l.simulation ? 'blue' : 'green'}>{l.shadowMode ? t('Shadow') : l.simulation ? t('Simulation') : 'LIVE'}</Tag>
-          </header>
-          <div className="switches">
-            <label><Switch size="small" checked={plateOn(l)} disabled={!operate} onChange={on => act(`lanes/${l.id}/recognition`, { plate: on, face: faceOn(l) }, 'put')} /> {t('Plate')}</label>
-            <label><Switch size="small" checked={faceOn(l)} disabled={!operate} onChange={on => act(`lanes/${l.id}/recognition`, { plate: plateOn(l), face: on }, 'put')} /> FaceID</label>
-            <span className="policy">{t(l.policy)}</span>
-          </div>
-          {e ? <div className="body" onClick={() => setDetail(e)}>
-            <div className="plate">{e.plate || '—'}</div>
-            <div className="who">{(e.personId || faceOn(l)) && <><UserOutlined /> {e.personId ? name(e.personId) : t('No face')}</>} <small>{hhmm(e.createdUtc)}</small></div>
-            {moto && e.plate && <div className={'match ' + (matches(e, v) ? 'ok' : 'bad')}>{matches(e, v) ? '✓ ' + t('Rider is registered for this motorbike') : '✗ ' + t('Rider does not match the registration')}</div>}
-            <div className="result"><Tag color={outcomeColor(e.outcome)}>{t(e.outcome)}</Tag><span>{t(e.reason)}</span></div>
-          </div> : <div className="body empty">{t('No vehicle yet')}</div>}
-          <footer>
-            {e && pendingReview(e, l) && operate && <><Button size="small" type="primary" onClick={() => { setReview({ event: e, approve: true }); setNote('') }}>{t('Approve')}</Button>
-              <Button size="small" danger onClick={() => { setReview({ event: e, approve: false }); setNote('') }}>{t('Reject')}</Button></>}
-            {e && e.outcome === 'Allow' && !opened.has(e.id) && new Date(e.expiresUtc) > Date.now() && operate &&
-              <Button size="small" type="primary" onClick={() => act(`events/${e.id}/open`)}>{t('Open barrier')}</Button>}
-            <span className="spacer" />
-            {operate && <ManualOpen lane={l} last={e} act={act} label={t('Manual open')} />}
-          </footer>
-        </article>
-      })}</div>
-      <aside className="ovFeed">
-        <header>{t('All lanes')} · {feed.length}</header>
-        <ul>{feed.map(e => <li key={e.id} onClick={() => show(e)} className={focus === e.laneId ? 'focus' : ''}>
-          <time>{hhmm(e.createdUtc)}</time><span className="lane">{laneName(lanes.find(l => l.id === e.laneId))}</span>
-          <span className="plate">{e.plate || '—'}</span><span className="who">{e.personId ? name(e.personId) : ''}</span>
-          <Tag color={outcomeColor(e.outcome)}>{t(e.outcome)}</Tag>
-        </li>)}</ul>
-      </aside>
+    <div className="vbFrames">
+      {frame('Motorbike', t('Motorbike information'), '🏍')}
+      {frame('Car', t('Car information'), <CarOutlined />)}
     </div>
-    <Modal open={!!detail} onCancel={() => setDetail(null)} footer={null} title={detail && laneName(lanes.find(l => l.id === detail.laneId)) + ' · ' + hhmm(detail.createdUtc)}>
-      {detail && <dl className="ovDetail">
-        <dt>{t('Plate')}</dt><dd>{detail.plate || '—'} {detail.plateConfidence ? '(' + Math.round(detail.plateConfidence * 100) + '%)' : ''}</dd>
-        <dt>{t('Person')}</dt><dd>{detail.personId ? name(detail.personId) + ' (' + Math.round(detail.faceConfidence * 100) + '%)' : '—'}</dd>
-        <dt>{t('Outcome')}</dt><dd><Tag color={outcomeColor(detail.outcome)}>{t(detail.outcome)}</Tag> {t(detail.reason)}</dd>
-        <dt>{t('Source')}</dt><dd>{t(detail.source)}</dd>
-        {detail.reviewBy && <><dt>{t('Reviewed by')}</dt><dd>{detail.reviewBy}: {detail.reviewNote}</dd></>}
-        <dt>{t('Barrier')}</dt><dd>{t(data.commands.find(c => c.eventId === detail.id)?.status || 'Not opened')}</dd>
-      </dl>}
-    </Modal>
     <Modal open={!!review} title={review?.approve ? t('Approve this pass') : t('Reject this pass')} okText={review?.approve ? t('Approve') : t('Reject')}
       okButtonProps={{ disabled: note.trim().length < 3, danger: !review?.approve }} onCancel={() => setReview(null)}
       onOk={async () => { if (await act(`events/${review.event.id}/review`, { approve: review.approve, note })) setReview(null) }}>
       <p>{review?.event.plate} · {review && t(review.event.reason)}</p>
       <Input.TextArea rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder={t('Reason (at least 3 characters)')} />
     </Modal>
-    <Modal open={adding} forceRender title={t('Add lane')} onCancel={() => setAdding(false)} onOk={() => form.submit()}>
-      <Form form={form} layout="vertical" onFinish={addLane} initialValues={{ kind: 'Car', direction: 'Entry' }}>
-        <Form.Item name="id" label={t('Lane ID')} rules={[{ required: true, pattern: /^[a-zA-Z0-9_-]{1,40}$/, message: t('Letters, digits, - or _') }]}><Input placeholder="oto-vao-5" /></Form.Item>
-        <Form.Item name="name" label={t('Name')}><Input /></Form.Item>
-        <Form.Item name="kind" label={t('Kind')}><Select options={[{ value: 'Car', label: t('Car') }, { value: 'Motorbike', label: t('Motorbike') }]} /></Form.Item>
-        <Form.Item name="direction" label={t('Direction')}><Select options={[{ value: 'Entry', label: t('Entry') }, { value: 'Exit', label: t('Exit') }]} /></Form.Item>
-        <Alert type="info" showIcon message={t('A new lane starts in shadow mode: it decides but never opens. Attach its camera and switch it on in Lane settings.')} />
-      </Form>
-    </Modal>
   </>
+}
+
+function Count({ icon, label, value }) {
+  return <div className="vbCount"><span className="ic">{icon}</span><span>{label}</span><strong>{value ?? '—'}</strong></div>
+}
+
+function VehicleFrame({ kind, title, icon, lanes, data, visits, vehicles, name, can, act, onReview }) {
+  const operate = can('OperateLane'), photos = can('ViewEvidence')
+  const ids = new Set(lanes.map(l => l.id))
+  const laneOf = id => lanes.find(l => l.id === id)
+  const mine = data.events.filter(e => ids.has(e.laneId))
+  // A pass waiting for the guard stays on screen even when later vehicles pass: it must not scroll away unseen.
+  const e = mine.find(x => pendingReview(x, laneOf(x.laneId))) || mine[0]
+  // Pair the newest event with its visit (entry ↔ its own exit). No visit (refused, pending, lane without an area): the event alone.
+  const visit = e && visits.find(v => v.inEventId === e.id || v.outEventId === e.id)
+  const byId = id => data.events.find(x => x.id === id)
+  const exitLane = e && laneOf(e.laneId)?.direction === 'Exit'
+  const leg = (id, utc, flag) => ({ id, utc, has: (byId(id)?.evidenceId != null) || !!flag })
+  const legIn = visit ? leg(visit.inEventId, visit.inUtc, visit.inPhoto) : e && !exitLane ? leg(e.id, e.createdUtc) : null
+  const legOut = visit ? (visit.outUtc && visit.outEventId ? leg(visit.outEventId, visit.outUtc, visit.outPhoto) : null) : e && exitLane ? leg(e.id, e.createdUtc) : null
+  const plate = e?.plate || visit?.plate || ''
+  const v = vehicles[plate]
+  const owner = v?.personId ? name(v.personId) : null
+  const rider = e?.personId
+  const matches = v && rider && (v.personId === rider || (v.authorizedPeople || []).some(p => p.personId === rider))
+  const pending = e && pendingReview(e, laneOf(e.laneId))
+  const opened = new Set(data.commands.map(c => c.eventId))
+  const canOpen = e && e.outcome === 'Allow' && !opened.has(e.id) && new Date(e.expiresUtc) > Date.now()
+  return <article className={'vbFrame' + (pending ? ' pending' : '')}>
+    <header>
+      <h2><span className="ic">{icon}</span>{title}</h2>
+      <div className="vbLanes">{lanes.map(l => <div key={l.id} className="vbLane">
+        <b>{laneName(l)}</b>
+        <label><Switch size="small" checked={plateOn(l)} disabled={!operate} onChange={on => act(`lanes/${l.id}/recognition`, { plate: on, face: faceOn(l) }, 'put')} /> {t('Plate')}</label>
+        <label><Switch size="small" checked={faceOn(l)} disabled={!operate} onChange={on => act(`lanes/${l.id}/recognition`, { plate: plateOn(l), face: on }, 'put')} /> FaceID</label>
+      </div>)}{!lanes.length && <span className="muted">{t('No lane')}</span>}</div>
+    </header>
+    {e ? <>
+      <dl className="vbInfo">
+        <dt>{t('Time')}</dt>
+        <dd>{legIn && <span>{hhmm(legIn.utc)} {t('in')}</span>}{legIn && legOut && ' · '}{legOut && <span>{hhmm(legOut.utc)} {t('out')}</span>}
+          <Tag color={outcomeColor(e.outcome)}>{t(pending ? 'Waiting for the guard' : e.outcome)}</Tag></dd>
+        {kind === 'Motorbike' && <>
+          <dt>{t('Vehicle owner')}</dt><dd>{owner || <span className="muted">{t('Not registered')}</span>}</dd>
+          <dt>{t('Rider')}</dt><dd>{rider ? name(rider) : <span className="muted">{t('No face')}</span>}
+            {plate && rider && <span className={'match ' + (matches ? 'ok' : 'bad')}>{matches ? '✓ ' + t('Rider is registered for this motorbike') : '✗ ' + t('Rider does not match the registration')}</span>}</dd>
+        </>}
+        <dt>{t('Plate')}</dt><dd><span className="plate">{plate || '—'}</span>{plate && !v && <Tag color="red">{t('Not registered')}</Tag>}</dd>
+      </dl>
+      {operate && (pending || canOpen) && <div className="vbReview">
+        <span>{pending ? t(e.reason) : t('Allowed, barrier not opened yet')}</span>
+        {pending && <><Button size="small" type="primary" onClick={() => onReview(e, true)}>{t('Approve')}</Button>
+          <Button size="small" danger onClick={() => onReview(e, false)}>{t('Reject')}</Button></>}
+        {canOpen && <Button size="small" type="primary" onClick={() => act(`events/${e.id}/open`)}>{t('Open barrier')}</Button>}
+      </div>}
+      <div className="vbLegs">
+        <Shots label={t('Entry photo')} leg={legIn} allowed={photos} empty="—" />
+        <Shots label={t('Exit photo')} leg={legOut} allowed={photos} empty={legIn ? t('Not out yet') : '—'} />
+      </div>
+    </> : <div className="vbEmpty">{t('No vehicle yet')}</div>}
+  </article>
+}
+
+// One half of a frame: plate photo (event evidence) over the overview photo (the event's "Overview" image, CameraInboxWorker).
+function Shots({ label, leg, allowed, empty }) {
+  return <div className="vbLeg">
+    <h3><span>{label}</span>{leg && <span className="time">{hhmm(leg.utc)}</span>}</h3>
+    {leg ? <>
+      <Shot src={leg.has && allowed ? evidenceSrc(leg.id) : null} caption={t('Plate photo')} plate />
+      <SceneShot eventId={leg.id} allowed={allowed} />
+    </> : <div className="vbNone"><Tag color="gold">{empty}</Tag></div>}
+  </div>
+}
+function SceneShot({ eventId, allowed }) {
+  const [src, setSrc] = useState(null)
+  useEffect(() => {
+    setSrc(null)
+    if (!allowed || !eventId) return
+    let live = true
+    api.get(base + '/events/' + eventId + '/photos').then(r => { const p = r.data.find(x => x.kind === 'Overview'); if (live && p) setSrc('/api' + base + '/photos/' + p.id) }).catch(() => {})
+    return () => { live = false }
+  }, [eventId, allowed])
+  return <Shot src={src} caption={t('Overview photo')} />
+}
+function Shot({ src, caption, plate }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [src])
+  return <figure className={'vbShot' + (plate ? ' plate' : '')}>
+    {src && !broken ? <a href={src} target="_blank" rel="noreferrer"><img alt={caption} loading="lazy" src={src} onError={() => setBroken(true)} /></a> : <span className="none">{t('No photo')}</span>}
+    <figcaption>{caption}</figcaption>
+  </figure>
 }

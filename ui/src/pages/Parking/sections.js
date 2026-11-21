@@ -17,7 +17,6 @@ export const SECTIONS = [
   // Camera setup; guards watch the cameras on the video wall and open an event's video from the access log.
   { key: 'cameras', path: '/settings/cameras', group: 'Settings', label: 'Cameras & video', show: can => can('ManageSite') && can('ViewEvidence') },
   { key: 'deviceInput', path: '/settings/device-input', group: 'Settings', label: 'Device input', show: can => can('ManageSite') || can('ManagePeople') },
-  { key: 'displays', path: '/settings/displays', group: 'Settings', label: 'Public screens', show: can => can('ManageSite') },
   { key: 'users', path: '/settings/users', group: 'Settings', label: 'Operators & roles', show: can => can('ManageUsers') },
   // Test tool: plays a plate / face result or uploads a camera image on a simulated lane. Not a guard screen.
   { key: 'simulate', path: '/settings/simulate', group: 'Settings', label: 'Simulate a pass', show: can => can('ManageSite') && can('OperateLane') },

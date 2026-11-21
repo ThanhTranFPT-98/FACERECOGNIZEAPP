@@ -6,13 +6,13 @@ import Overview from './pages/Overview/Overview'
 import Parking from './pages/Parking/Parking'
 import { SECTIONS } from './pages/Parking/sections'
 import { AuthProvider } from './contexts/AuthContext'
-import PublicDisplay from './pages/Display/PublicDisplay'
+import Board from './pages/Display/Board'
 
 // CR-026: one route per screen. The legacy face pages (Monitor, Employees, Strangers, AccessLogs, Alerts, Settings: SQL Server)
 // are no longer routed: faces are enrolled on the FaceID devices (decision 09/11/2026) and the parking screens cover the rest.
 function App() {
-  // CR-024: a public screen (TV) opens /display/<id>?key=… with no account, so it is rendered outside sign-in.
-  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/display/')) return <PublicDisplay />
+  // CR-031: the screen outside the mine door opens /board?key=… with no account, so it is rendered outside sign-in.
+  if (typeof window !== 'undefined' && window.location.pathname === '/board') return <Board />
   return (
     <AuthProvider><SignalRProvider>
       <Router>

@@ -142,3 +142,5 @@
 .alPhotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .alPhotos figure { margin: 0; } .alPhotos img { width: 100%; border: 1px solid var(--border); border-radius: 7px; } .alPhotos figcaption { color: var(--fg-muted); font-size: 12px; }
 @media (max-width: 980px) { .alKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* CR-030: manual open on each camera-wall tile, at the end of the context row. */
+.cwContext > .cwOpen { flex: 0 0 auto; margin-left: auto; }

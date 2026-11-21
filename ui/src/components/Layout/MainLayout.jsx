@@ -16,7 +16,6 @@ import {
   EnvironmentOutlined,
   NodeIndexOutlined,
   CameraOutlined,
-  DesktopOutlined,
   SafetyOutlined,
   ExperimentOutlined,
   SunOutlined,
@@ -34,7 +33,7 @@ import { t, getLang, setLang } from '../../i18n'
 // CR-026: the menu is the list of station screens (pages/Parking/sections.js), grouped, filtered by the user's permissions.
 const ICONS = { overview: DashboardOutlined, presence: TeamOutlined, passes: SwapOutlined, alerts: BellOutlined, wall: VideoCameraOutlined,
   devices: ApiOutlined, people: IdcardOutlined, vehicles: CarOutlined, visitors: UserAddOutlined, history: FileTextOutlined,
-  areas: EnvironmentOutlined, lanes: NodeIndexOutlined, cameras: CameraOutlined, deviceInput: ApiOutlined, displays: DesktopOutlined,
+  areas: EnvironmentOutlined, lanes: NodeIndexOutlined, cameras: CameraOutlined, deviceInput: ApiOutlined,
   users: SafetyOutlined, simulate: ExperimentOutlined }
 const menuFor = can => GROUPS.map(group => ({ type: 'group', key: group, label: t(group),
   children: SECTIONS.filter(s => s.group === group && s.show(can)).map(s => ({ key: s.path, icon: React.createElement(ICONS[s.key] || SettingOutlined), label: t(s.label) })) }))

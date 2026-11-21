@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Input, Pagination, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { AimOutlined, AlertOutlined, CheckOutlined, CompressOutlined, DisconnectOutlined, ExpandOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, UnlockOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { t } from '../../i18n'
+import ManualOpen from './ManualOpen'
 import { KINDS, SEVERITY_RANK, cameraOnline, hhmm, laneKind, laneName, severityTone, sortLanes } from './laneUtil'
 import './station.css'
 
@@ -12,7 +13,7 @@ const LIVE_BUDGET = 16
 const base = '/v1/parking'
 const KIND_LABEL = { all: 'All', Car: 'Car lanes', Motorbike: 'Motorbike lanes', Person: 'Person lanes', Overview: 'Overview' }
 
-export default function VideoWall({ data, wall, alertLane, can, request, loadWall, onSetupLane, isAdmin }) {
+export default function VideoWall({ data, wall, alertLane, can, request, loadWall, onSetupLane, isAdmin, people }) {
   const [kind, setKind] = useState('all'), [lane, setLane] = useState('all'), [status, setStatus] = useState('all'), [query, setQuery] = useState('')
   const [want, setWant] = useState(4), [page, setPage] = useState(1), [selected, setSelected] = useState(null), [focused, setFocused] = useState(null)
   const gateway = wall?.gatewayUrl ? wall.gatewayUrl.replace(/\/$/, '') : null
@@ -67,7 +68,8 @@ export default function VideoWall({ data, wall, alertLane, can, request, loadWal
     if (i >= 0) { setPage(Math.floor(i / size) + 1); setSelected(rows[i].id) }
   }
 
-  // Opening goes through the existing decision paths only: approve the lane's pending event, or open its allowed one.
+  // Opening goes through the decision paths only. Manual open (CR-029/030) stores the guard's own decision;
+  // the older button approves the lane's pending event or re-sends its allowed one, and shows only when there is one.
   const openLane = async laneId => {
     const e = lastEvent[laneId]
     if (e?.outcome === 'ManualReview') await request('events/' + e.id + '/review', { approve: true, note: t('Opened from the camera wall') })
@@ -80,6 +82,8 @@ export default function VideoWall({ data, wall, alertLane, can, request, loadWal
   useEffect(() => {
     if (!focused) return undefined
     const onKey = e => {
+      // Typing in a dialog (manual open note, plate…) must not switch or close the focused camera.
+      if (e.target.closest?.('.ant-modal-wrap, input, textarea, [contenteditable="true"]')) return
       if (e.key === 'Escape') setFocused(null)
       const i = focusRows.findIndex(r => r.id === focused)
       if (e.key === 'ArrowRight' && focusRows.length) setFocused(focusRows[(i + 1) % focusRows.length].id)
@@ -91,12 +95,17 @@ export default function VideoWall({ data, wall, alertLane, can, request, loadWal
 
   const player = r => <iframe title={r.id} src={gateway + '/' + r.id + '/'} allow="autoplay; fullscreen" />
   const where = r => r.lane ? laneName(r.lane) + ' · ' + t(r.lane.direction) : t('No lane')
+  // CR-033: manual open on every lane tile. The wrapper keeps clicks and keys (also from the dialog, which React bubbles
+  // through the portal) away from the tile, so they don't select or focus it. 16 tiles: icon only.
+  const stop = e => e.stopPropagation()
+  const manual = r => r.lane && can('OperateLane') && <span className="cwOpen" title={t('Manual open')} onClick={stop} onDoubleClick={stop} onKeyDown={stop}>
+    <ManualOpen lane={r.lane} last={lastEvent[r.lane.id]} people={people} act={request} label={want < 4 ? t('Manual open') : null} /></span>
 
   const tile = r => {
     if (r.pending) return <div key={r.id} className="cwSlot pending" role="listitem">
       <div className="cwVideo"><div className="cwPlaceholder pend"><b>{laneName(r.lane)} · {t(r.lane.direction)}</b><span>{t('Lane declared, no camera yet')}</span>
         {can('ManageSite') && <Button size="small" icon={<PlusOutlined />} onClick={() => onSetupLane(r.lane.id)}>{t('Attach camera')}</Button>}</div></div>
-      <div className="cwContext"><span><b>{laneName(r.lane)}</b> · {t(r.lane.direction)}</span><strong className="pending">{t('No camera')}</strong></div></div>
+      <div className="cwContext"><span><b>{laneName(r.lane)}</b> · {t(r.lane.direction)}</span><strong className="pending">{t('No camera')}</strong>{manual(r)}</div></div>
     const laneAlerts = (r.lane && alertsByLane[r.lane.id]) || []
     const top = laneAlerts[0]
     const on = cameraOnline(r)
@@ -115,7 +124,7 @@ export default function VideoWall({ data, wall, alertLane, can, request, loadWal
         <div className="cwFooter"><strong>{r.id}</strong><span>{r.name}</span></div>
       </div>
       <div className="cwContext"><span>{r.lane ? <><b>{laneName(r.lane)}</b> · {t(r.lane.direction)}</> : t('No lane')}</span>
-        {!on ? <strong className="offline">{t('Disconnected')}</strong> : top ? <strong className={top.severity === 'Critical' ? 'critical' : 'warning'}>{laneAlerts.length} {t('alerts')}</strong> : <strong className="normal">{t('Normal')}</strong>}</div>
+        {!on ? <strong className="offline">{t('Disconnected')}</strong> : top ? <strong className={top.severity === 'Critical' ? 'critical' : 'warning'}>{laneAlerts.length} {t('alerts')}</strong> : <strong className="normal">{t('Normal')}</strong>}{manual(r)}</div>
     </div>
   }
 
@@ -186,8 +195,10 @@ export default function VideoWall({ data, wall, alertLane, can, request, loadWal
           {focusRow.lane && <><Typography.Text strong>{t('Latest passages')} · {laneName(focusRow.lane)}</Typography.Text>
             <ul className="cwPasses">{data.events.filter(e => e.laneId === focusRow.lane.id).sort((a, b) => new Date(b.createdUtc) - new Date(a.createdUtc)).slice(0, 6).map(e =>
               <li key={e.id}><span className="t">{hhmm(e.createdUtc)}</span><span className="who">{e.plate || e.personId || '—'} · {t(e.reason)}</span><Tag color={e.outcome === 'Allow' ? 'green' : e.outcome === 'Deny' ? 'red' : 'orange'}>{t(e.outcome)}</Tag></li>)}</ul>
-            {can('OperateLane') && <Button danger icon={<UnlockOutlined />} disabled={!canOpen(focusRow.lane.id)} title={canOpen(focusRow.lane.id) ? '' : t('No passage waiting to be opened on this lane')} onClick={() => openLane(focusRow.lane.id)}>
-              {t(laneKind(focusRow.lane) === 'Person' ? 'Open gate' : 'Open barrier')} · {laneName(focusRow.lane)}</Button>}</>}
+            {can('OperateLane') && <Space wrap>
+              <ManualOpen lane={focusRow.lane} last={lastEvent[focusRow.lane.id]} people={people} act={request} label={t('Manual open') + ' · ' + laneName(focusRow.lane)} size="middle" danger />
+              {canOpen(focusRow.lane.id) && <Button icon={<UnlockOutlined />} onClick={() => openLane(focusRow.lane.id)}>
+                {t(laneKind(focusRow.lane) === 'Person' ? 'Open gate' : 'Open barrier')} · {lastEvent[focusRow.lane.id].plate || lastEvent[focusRow.lane.id].personId || t(lastEvent[focusRow.lane.id].outcome)}</Button>}</Space>}</>}
         </aside>
       </div>
     </section>}

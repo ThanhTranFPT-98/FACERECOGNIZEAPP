@@ -1,0 +1,4 @@
+/* CR-031: the mine gate board on the screen outside the mine door. The board itself is styled by overview.css. */
+.ov.board { min-height: 100vh; padding: 16px 20px; background: var(--bg-base); }
+.boardHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.boardHead .clock { color: var(--fg-strong); font: 600 28px 'IBM Plex Mono', monospace; }

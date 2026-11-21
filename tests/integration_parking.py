@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
 import threading
 import http.server
 import base64
@@ -68,7 +69,7 @@ class ParkingIntegration(unittest.TestCase):
     def start(self):
         dotnet = os.environ.get('PARKING_DOTNET', 'dotnet')
         urls = ';'.join([self.base] + getattr(self, 'extra_urls', []))
-        self.process = subprocess.Popen([dotnet, str(ROOT / 'DSAVehicle/bin/Debug/net8.0/DSAVehicle.dll'), '--urls', urls],
+        self.process = subprocess.Popen([dotnet, os.environ.get('PARKING_API_DLL', str(ROOT / 'DSAVehicle/bin/Debug/net8.0/DSAVehicle.dll')), '--urls', urls],
             cwd=ROOT / 'DSAVehicle', env=self.env, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         for _ in range(100):
@@ -303,56 +304,58 @@ class ParkingIntegration(unittest.TestCase):
         self.assertTrue(all(a['createdUtc'].endswith('Z') for a in self.call('GET', root + '/audit')[1]))
         print('Verified lane name and kind: saved, validated, optional; times in UTC.')
 
-    def test_public_display(self):
-        # CR-024: a public PPE screen (TV) reads its state with its own key; PPE results per camera, never names.
+    def test_public_board(self):
+        # CR-031: the screen outside the mine door shows the mine gate board with the station's board key, without an account.
         root = '/api/v1/parking'
         receiver = secrets.token_urlsafe(32)
         self.env['Receiver__Key'] = receiver
         self.process.terminate(); self.process.wait(timeout=10); self.start()
         self.login_as('admin')
         lane = {'id': 'door-32', 'name': 'Cửa lò +32', 'kind': 'Person', 'direction': 'Entry', 'policy': 'FaceOnly', 'plateThreshold': .9, 'faceThreshold': .8,
-                'shadowMode': True, 'simulation': True, 'subject': 'Person', 'ppeRules': 'helmet=required,vest=warn', 'ppeMissingMode': 'Review'}
+                'shadowMode': True, 'simulation': True, 'subject': 'Person', 'ppeRules': 'helmet=required', 'ppeMissingMode': 'AllowAlert'}
         self.assertEqual(self.call('PUT', root + '/lanes', lane)[0], 200)
-        for cam, roi in [('ppe-1', 'D1'), ('ppe-2', 'D2')]:
-            self.assertEqual(self.call('PUT', root + '/cameras', {'id': cam, 'name': cam, 'laneId': 'door-32', 'externalDevice': 'AIBOX-9', 'externalRoi': roi})[0], 200)
-        screen = {'id': 'TV-1', 'name': 'TV cửa lò', 'laneId': 'door-32', 'title': 'CỬA LÒ +32', 'cameras': [{'id': 'ppe-1', 'name': 'Trái'}, {'id': 'ppe-2', 'name': 'Phải'}],
-                  'zoom': 1.8, 'holdSeconds': 5, 'sound': 'off'}
-        self.assertEqual(self.call('PUT', root + '/displays', {**screen, 'cameras': [{'id': 'cam-elsewhere', 'name': 'x'}]})[0], 409)  # not on this lane
-        status, saved = self.call('PUT', root + '/displays', screen)
-        self.assertEqual(status, 200)
-        key = saved['key']
-        self.assertTrue(len(key) >= 32)
-        # The TV has no session: only the key opens the state.
+        self.assertEqual(self.call('PUT', root + '/lanes', {'id': 'car-1', 'direction': 'Entry', 'policy': 'PlateOnly', 'plateThreshold': .9, 'faceThreshold': .8,
+                                                          'shadowMode': True, 'simulation': True, 'subject': 'Vehicle'})[0], 200)
+        self.assertEqual(self.call('PUT', root + '/cameras', {'id': 'face-32', 'name': 'face-32', 'laneId': 'door-32', 'externalDevice': 'ZK-32', 'trustedConfidence': .99})[0], 200)
+        for person in [7, 8]:
+            self.assertEqual(self.call('PUT', root + '/people', {'personId': person, 'name': f'Worker {person}'})[0], 200)
+        self.post_raw(f'{self.base}{root}/receiver/generic?key={receiver}', {'deviceId': 'ZK-32', 'personId': 7, 'confidence': .97})
+        self.assertTrue(self.wait_events(lambda e: e['laneId'] == 'door-32' and e['personId'] == 7))
         anonymous = urllib.request.build_opener()
-        def state(k):
+        def get(path):
             try:
-                with anonymous.open(f'{self.base}{root}/display/TV-1/state?key={k}', timeout=10) as r: return r.status, json.loads(r.read())
+                with anonymous.open(f'{self.base}{root}/board/{path}', timeout=10) as r: return r.status, json.loads(r.read())
             except urllib.error.HTTPError as e: return e.code, None
-        self.assertEqual(state('wrong')[0], 401)
-        status, body = state(key)
-        self.assertEqual((status, [c['state'] for c in body['cameras']]), (200, ['idle', 'idle']))
-        self.assertEqual(body['config']['rules'], {'helmet': 'required', 'vest': 'warn'})
-        # ROI D1: no helmet (with a person box); D2: helmet but no vest (warn-only).
-        self.post_raw(f'{self.base}{root}/receiver/ppe?key={receiver}', {'deviceId': 'AIBOX-9', 'channel': '1', 'frame': 1, 'rois': [
-            {'roiId': 'D1', 'tracks': [{'trackId': 't1', 'items': {'helmet': False, 'vest': True}, 'box': [.3, .2, .2, .6]}]},
-            {'roiId': 'D2', 'tracks': [{'trackId': 't2', 'items': {'helmet': True, 'vest': False}}]}]})
-        for _ in range(80):
-            status, body = state(key)
-            if body['cameras'][0]['state'] != 'idle': break
-            time.sleep(.1)
-        one, two = body['cameras']
-        self.assertEqual((one['state'], one['missing'], one['box']), ('violation', ['helmet'], [.3, .2, .2, .6]))
-        self.assertEqual((two['state'], two['missing']), ('warning', ['vest']))
-        self.assertFalse({'personId', 'name', 'subjectName', 'trackId'} & {k for c in body['cameras'] for k in c})  # results only: no person ID or name
-        seen = next(d for d in self.call('GET', root + '/displays')[1] if d['id'] == 'TV-1')
-        self.assertIsNotNone(seen['lastSeenUtc'])
-        # A new key disconnects the old address; a guard cannot manage screens.
-        self.assertEqual(self.call('POST', root + '/displays/TV-1/rekey', {})[0], 200)
-        self.assertEqual(state(key)[0], 401)
+        # Off until an administrator creates the address.
+        self.assertEqual(self.call('GET', root + '/board/link')[1]['key'], None)
+        self.assertEqual(get('state?key=anything')[0], 401)
+        status, link = self.call('POST', root + '/board/rekey', {})
+        key = link['key']
+        self.assertEqual(status, 200); self.assertTrue(len(key) >= 32)
+        self.assertNotIn('boardKeyProtected', self.call('GET', root + '/settings/timings')[1])  # the site settings row never shows the key
+        self.assertEqual(get('state')[0], 401)
+        self.assertEqual(get('state?key=wrong')[0], 401)
+        status, board = get(f'state?key={key}')
+        self.assertEqual(status, 200)
+        self.assertEqual([l['id'] for l in board['lanes']], ['door-32'])           # person lanes only, no vehicle lane
+        self.assertTrue(any(e['personId'] == 7 for e in board['events']))
+        on_board = {v['personId'] for v in board['visits']}
+        self.assertTrue({p['personId'] for p in board['people']} <= on_board)      # only people on the board, not the register
+        self.assertIsNotNone(self.call('GET', root + '/board/link')[1]['lastSeenUtc'])
+        # Photos: with the key only, and only for a person-lane passage.
+        self.assertEqual(get(f'events/{uuid.uuid4()}/evidence?key={key}')[0], 404)
+        self.assertEqual(get(f'events/{uuid.uuid4()}/evidence')[0], 401)
+        # A new address disconnects the old one; "Turn off" stops the board; a guard cannot manage it.
+        new_key = self.call('POST', root + '/board/rekey', {})[1]['key']
+        self.assertEqual(get(f'state?key={key}')[0], 401)
+        self.assertEqual(get(f'state?key={new_key}')[0], 200)
+        self.assertEqual(self.call('DELETE', root + '/board/key')[0], 200)
+        self.assertEqual(get(f'state?key={new_key}')[0], 401)
         self.assertEqual(self.call('POST', '/api/auth/users', {'username': 'Guard', 'password': self.password, 'role': 'Guard'})[0], 200)
         self.login_as('Guard')
-        self.assertEqual(self.call('GET', root + '/displays')[0], 403)
-        print('Verified public screen: key, per-camera PPE state with box, warn-only amber, rekey, permissions.')
+        self.assertEqual(self.call('GET', root + '/board/link')[0], 403)
+        self.assertEqual(self.call('POST', root + '/board/rekey', {})[0], 403)
+        print('Verified public board: off by default, key, person lanes only, rekey, turn off, permissions.')
 
     def login_as(self, username):
         # Fresh cookie jar per account, so two sessions can exist side by side.

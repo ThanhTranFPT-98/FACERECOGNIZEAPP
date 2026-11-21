@@ -85,6 +85,7 @@ public static class ParkingSetup
         builder.Services.AddSingleton<ICameraAdapter, GenericAdapter>();
         builder.Services.AddSingleton<ICameraAdapter, PpeAdapter>();
         builder.Services.AddSingleton<PpeCache>();
+        builder.Services.AddSingleton<BoardSeen>();
         builder.Services.AddSingleton<CameraAdapters>();
         // CR-015: device profiles (declarative adapters) and the store-before-ACK entry point shared by the receiver and SDK connectors.
         builder.Services.AddSingleton<ProfileCache>();

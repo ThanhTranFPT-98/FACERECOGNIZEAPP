@@ -9,7 +9,6 @@ import DeviceInputs from './DeviceInputs'
 import VideoWall from './VideoWall'
 import LaneSetup from './LaneSetup'
 import AccessLog from './AccessLog'
-import DisplaySettings from './DisplaySettings'
 import { SECTIONS } from './sections'
 const base = '/v1/parking'
 const opts = values => values.map(value => ({ value, label: t(value) }))
@@ -237,7 +236,7 @@ export default function Parking({ section }) {
   const loadWall = async () => { try { setWall((await api.get(base + '/video/wall')).data) } catch { setWall(null) } }
   const laneAlert = laneId => data.alerts.some(a => alertLane(a) === laneId && (a.severity === 'High' || a.severity === 'Critical'))
   // CR-023: camera wall; "Attach camera" on a lane without one jumps to that lane in Lane settings.
-  const wallTab = <VideoWall data={data} wall={wall} alertLane={alertLane} can={can} request={request} loadWall={loadWall} isAdmin={isAdmin}
+  const wallTab = <VideoWall data={data} wall={wall} alertLane={alertLane} can={can} request={request} loadWall={loadWall} isAdmin={isAdmin} people={people}
     onSetupLane={id => { setSetupLane(id); navigate('/settings/lanes', { state: { lane: id } }) }} />
   const saveThen = form => async (path, values, method = 'put') => { if (await request(path, values, method)) form.resetFields() }
   const areasTab = <><Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('Area → Location → Lane. Move lanes between locations in Lane settings. An area or location can only be deleted when it is empty.')} />
@@ -297,7 +296,7 @@ export default function Parking({ section }) {
         <Form.Item name="permissions" label={t('Permissions (ViewLive is always included)')}><Select mode="multiple" options={opts(roles.permissions)} /></Form.Item>
         <Space><Button type="primary" htmlType="submit">{t('Save role')}</Button><Button onClick={() => roleForm.resetFields()}>{t('Clear')}</Button></Space></Form></Card>}</>}</>
   const screens = { vehicles, visitors, people: peopleTab, alerts, devices: operations, cameras: cameraTab, wall: wallTab,
-    history: historyTab, areas: areasTab, lanes: settings, displays: <DisplaySettings data={data} cameras={cameras} />, deviceInput: <DeviceInputs can={can} />,
+    history: historyTab, areas: areasTab, lanes: settings, deviceInput: <DeviceInputs can={can} />,
     users: accounts, simulate: simulateTab }
   const current = SECTIONS.find(x => x.key === section)
   return <><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>

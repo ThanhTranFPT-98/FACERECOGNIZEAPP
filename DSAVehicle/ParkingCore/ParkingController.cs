@@ -124,6 +124,17 @@ public class ParkingController(ParkingDb db, ParkingService service, ParkingLock
             sessions = await sessions.OrderByDescending(x => x.EntryUtc).Take(200).ToListAsync()
         };
     }
+    // CR-032: overview "Xe ra vào" counters = vehicles that really went through today (a barrier command with a passage time),
+    // per lane, since local midnight in the site's time zone. Refused, pending and duplicate reads are not counted (user, 17/11).
+    [HttpGet("passages/today")]
+    public async Task<object> PassagesToday()
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById((await db.Site()).TimeZone);
+        var midnight = TimeZoneInfo.ConvertTimeToUtc(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone).Date, zone);
+        var query = db.Commands.AsNoTracking().Where(x => x.PassageUtc != null && x.PassageUtc >= midnight);
+        if ((await scope.Lanes())?.ToList() is { } allowed) query = query.Where(x => allowed.Contains(x.LaneId));
+        return await query.GroupBy(x => x.LaneId).Select(g => new { laneId = g.Key, count = g.Count() }).ToListAsync();
+    }
     [HttpGet("events")]
     public async Task<object> Events(string? plate, DateTime? from, DateTime? until, Guid? areaId, int page = 1)
     {

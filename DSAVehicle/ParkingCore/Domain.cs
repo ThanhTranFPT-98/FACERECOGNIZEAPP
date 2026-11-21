@@ -85,6 +85,9 @@ public class SiteSettings
     [MaxLength(200)] public string ReviewCategories { get; set; } = "Delivery";
     public int WalkInResetHour { get; set; } = 0;
     [MaxLength(60)] public string TimeZone { get; set; } = "Asia/Ho_Chi_Minh";
+    // CR-031: key of the public mine gate board (/board?key=…), protected with Data Protection. Null = the board is off.
+    // Never serialized: GET settings/timings returns this row. MVC writes JSON with Newtonsoft (Program.cs), so both attributes.
+    [Newtonsoft.Json.JsonIgnore, System.Text.Json.Serialization.JsonIgnore, MaxLength(400)] public string? BoardKeyProtected { get; set; }
     public DateTime NextReset(DateTime utcNow)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(TimeZone);
@@ -227,7 +230,6 @@ public class ParkingDb : DbContext
     public DbSet<SyncCursor> SyncCursors => Set<SyncCursor>();
     public DbSet<DeviceProfile> DeviceProfiles => Set<DeviceProfile>();
     public DbSet<PersonIdentity> PersonIdentities => Set<PersonIdentity>();
-    public DbSet<PublicDisplay> PublicDisplays => Set<PublicDisplay>();
     // A missing row (fresh test database) means the built-in defaults.
     public async Task<SiteSettings> Site(CancellationToken cancellation = default) =>
         await SiteSettings.AsNoTracking().SingleOrDefaultAsync(cancellation) ?? new();

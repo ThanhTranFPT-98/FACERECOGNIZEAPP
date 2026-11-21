@@ -47,8 +47,26 @@ public sealed record InsideEntry(string AreaCode, string SubjectKey, string Subj
 public sealed record UnmatchedExit(string AreaCode, string SubjectKey, string SubjectName, DateTime PassageUtc, string LaneId, string StationId);
 public sealed record VisitRow(string AreaCode, string SubjectKey, string SubjectName, DateTime InUtc, string InLaneId, Guid InEventId, DateTime? OutUtc, string? OutLaneId, Guid? OutEventId = null);
 
+// One entry (and its exit, if any) as the overview boards show it. Serialized camelCase, like the anonymous object it replaced.
+public sealed record VisitView(string AreaCode, string SubjectKey, string SubjectName, DateTime InUtc, string? InLaneId, Guid InEventId, DateTime? OutUtc, string? OutLaneId, Guid? OutEventId,
+    int? PersonId, string? Plate, string? PpeOutcome, string? PpeSummary, string? Shift, bool InPhoto, string? OutPpeOutcome, string? OutPpeSummary, bool OutPhoto);
+
 public static class PresenceBook
 {
+    // CR-025/027: entries and exits since `hours` ago in these areas, with the PPE, shift and photo flags of the in and out events.
+    // Shared by the overview (presence/visits) and the public mine gate board (CR-031).
+    public static async Task<List<VisitView>> VisitRows(ParkingDb db, IReadOnlyCollection<string> codes, int hours)
+    {
+        var since = DateTime.UtcNow.AddHours(-Math.Clamp(hours, 1, 168));
+        var rows = PresenceBook.Visits(await db.Presence.AsNoTracking().Where(x => x.PassageUtc >= since && codes.Contains(x.AreaCode)).ToListAsync()).Take(1000).ToList();
+        // CR-027: the exit event too, for the exit photo and the PPE seen on the way out. A manual close has no event.
+        var ids = rows.Select(x => x.InEventId).Concat(rows.Where(x => x.OutEventId.HasValue).Select(x => x.OutEventId!.Value)).Distinct().ToList();
+        var events = await db.Events.AsNoTracking().Where(e => ids.Contains(e.Id))
+            .Select(e => new { e.Id, e.PersonId, e.Plate, e.PpeOutcome, e.PpeSummary, e.Shift, photo = e.EvidenceId != null }).ToDictionaryAsync(e => e.Id);
+        return rows.Select(x => { var e = events.GetValueOrDefault(x.InEventId); var o = x.OutEventId is Guid outId ? events.GetValueOrDefault(outId) : null;
+            return new VisitView(x.AreaCode, x.SubjectKey, x.SubjectName, x.InUtc, x.InLaneId, x.InEventId, x.OutUtc, x.OutLaneId, o?.Id,
+                e?.PersonId, e?.Plate, e?.PpeOutcome, e?.PpeSummary, e?.Shift, e?.photo == true, o?.PpeOutcome, o?.PpeSummary, o?.photo == true); }).ToList();
+    }
     public static string StationId(IConfiguration config) => config["Parking:StationId"] is { Length: > 0 } id ? id : Environment.MachineName;
 
     // Replays passages in time order (not arrival order), per area and subject.
@@ -191,16 +209,7 @@ public class PresenceController(ParkingDb db, AreaScope scope, ParkingLock mutex
     {
         var visible = await scope.Areas();
         var codes = await db.Areas.AsNoTracking().Where(a => visible == null || visible.Contains(a.Id)).Select(a => a.Code).ToListAsync();
-        var since = DateTime.UtcNow.AddHours(-Math.Clamp(hours, 1, 168));
-        var rows = PresenceBook.Visits(await db.Presence.AsNoTracking().Where(x => x.PassageUtc >= since && codes.Contains(x.AreaCode)).ToListAsync()).Take(1000).ToList();
-        // CR-027: the exit event too, for the exit photo and the PPE seen on the way out. A manual close has no event.
-        var ids = rows.Select(x => x.InEventId).Concat(rows.Where(x => x.OutEventId.HasValue).Select(x => x.OutEventId!.Value)).Distinct().ToList();
-        var events = await db.Events.AsNoTracking().Where(e => ids.Contains(e.Id))
-            .Select(e => new { e.Id, e.PersonId, e.Plate, e.PpeOutcome, e.PpeSummary, e.Shift, photo = e.EvidenceId != null }).ToDictionaryAsync(e => e.Id);
-        return rows.Select(x => { var e = events.GetValueOrDefault(x.InEventId); var o = x.OutEventId is Guid outId ? events.GetValueOrDefault(outId) : null;
-            return new { x.AreaCode, x.SubjectKey, x.SubjectName, x.InUtc, x.InLaneId, x.InEventId, x.OutUtc, x.OutLaneId, outEventId = o?.Id,
-                personId = e?.PersonId, plate = e?.Plate, ppeOutcome = e?.PpeOutcome, ppeSummary = e?.PpeSummary, shift = e?.Shift, inPhoto = e?.photo == true,
-                outPpeOutcome = o?.PpeOutcome, outPpeSummary = o?.PpeSummary, outPhoto = o?.photo == true }; });
+        return await PresenceBook.VisitRows(db, codes, hours);
     }
 
     // A guard closes a presence that will never get its exit (e.g. exit through an unmonitored gate). Audited, never silent.
